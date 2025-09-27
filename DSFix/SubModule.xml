@@ -1,0 +1,21 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Module>
+	<Name value="DSFix"/>
+	<Id value="DSFix"/>
+	<Version value="1.0.0"/>
+	<SingleplayerModule value="true"/>
+	<DependedModules>
+		<DependedModule Id="Bannerlord.Harmony"/>
+		<DependedModule Id="Native"/>
+		<DependedModule Id="SandBoxCore"/>
+		<DependedModule Id="Sandbox"/>
+		<DependedModule Id="StoryMode" Optional="true"/>
+	</DependedModules>
+	<SubModules>
+		<SubModule>
+			<Name value="DSFix SubModule"/>
+			<DLLName value="DSFix.dll"/>
+			<SubModuleClassType value="DSFix.SubModule"/>
+		</SubModule>
+	</SubModules>
+</Module>
