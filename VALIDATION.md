@@ -6,39 +6,41 @@
 
 ## Symptom
 
-The battle ends, Distinguished Service runs its lord-promotion/flee path, and a roster removal crashes with an array index outside the native `TroopRoster` bounds.
+The battle ends, Distinguished Service runs its lord-promotion/flee path, and a roster removal reaches an invalid native `TroopRoster` array index.
 
-## Trigger
+## Trigger established by the stack
 
-`FleeToOtherClanLord` attempts to remove its `wanderer` from the ended `MapEventParty` troop roster after the battle outcome has already depleted or removed that character from the roster.
+The failing operation is the `TroopRoster.RemoveTroop` performed from `FleeToOtherClanLord` against an ended `MapEventParty` roster. That roster is already in the post-battle/map-event teardown lifecycle, where its contents may have been depleted or structurally changed before Distinguished Service performs its flee cleanup.
 
-## Root cause
+## Root cause boundary
 
-The Distinguished Service path assumes the ended map-event roster still contains the wanderer. On Bannerlord 1.3.15 that assumption is not stable at this lifecycle point. Native `TroopRoster.RemoveTroop` does not tolerate the resulting missing index on this overload and reaches `AddToCountsAtIndex` with an invalid index.
+The stack proves that Distinguished Service passes a roster-removal request whose resolved native roster index is no longer valid when `AddToCountsAtIndex` executes. The supplied material does not include the exact running `DistinguishedService.dll`, so the evidence does **not** distinguish among all states that can produce that invalid index (for example, an already-absent/depleted wanderer versus another stale descriptor/index state inside the ended map-event roster).
 
-## Violated invariant
-
-A `TroopRoster.RemoveTroop` call must address an element that is still present in that roster. The caller is allowed to want the postcondition "wanderer absent"; it cannot assume that the removal operation is still necessary after map-event teardown has mutated the roster.
+The compatibility invariant is still precise: the flee cleanup must not crash when its request targets the exact wanderer and exact ended map-event roster after that roster has already changed. The desired postcondition of this cleanup is that the wanderer is absent from that roster.
 
 ## Fix
 
-The compatibility patch marks only the dynamic extent of `PromotionManager.FleeToOtherClanLord`. While inside that method:
+The compatibility patch establishes a thread-local context only for the exact `PromotionManager.FleeToOtherClanLord(MapEventParty, CharacterObject)` call and captures both its `wanderer` argument and `MapEventParty.Troops` roster.
 
-1. Before the exact four-argument `TroopRoster.RemoveTroop(CharacterObject, ...)` overload runs, DSFix checks whether the troop is still present.
-2. If the troop is already absent, DSFix skips that one removal. The intended postcondition is already true and the remainder of Distinguished Service's flee logic continues.
-3. If the roster changes after the preflight and native removal still raises `IndexOutOfRangeException`, DSFix suppresses only that exception while still inside `FleeToOtherClanLord`.
-4. Every other roster-removal path keeps native behavior.
+1. The global hook on the exact four-argument `TroopRoster.RemoveTroop(CharacterObject, ...)` overload is inert unless both the troop reference and roster reference match that captured flee context.
+2. For that exact pair, DSFix first checks whether the troop is still present. If it is already absent, the redundant removal is skipped because the intended postcondition is already satisfied.
+3. If native removal for that exact pair still raises `IndexOutOfRangeException` (including a stale index/descriptor state or a roster change after preflight), DSFix suppresses only that exception and lets the remainder of Distinguished Service's flee logic continue.
+4. Other troops, other rosters, other `RemoveTroop` calls, and other exception types retain native behavior.
 
-## Alternative hypothesis checked
+## Alternative hypotheses checked
 
-A generic TOR summoned-agent cast failure is not the reported path: the stack reaches `PromotionManager.FleeToOtherClanLord` and native roster mutation, not `DSBattleLogic.ShowBattleResults`. The established summoned-agent transpiler remains separate and unchanged in purpose.
+A TOR summoned-agent cast failure is not this reported path: the stack reaches `PromotionManager.FleeToOtherClanLord` and native roster mutation, not `DSBattleLogic.ShowBattleResults`. The established summoned-agent transpiler remains separate and unchanged in purpose.
 
-A global `TroopRoster` corruption workaround was also rejected. The patch does not clamp indices, alter roster internals, or swallow `IndexOutOfRangeException` outside the exact Distinguished Service flee path.
+A global `TroopRoster` corruption workaround was rejected. The patch does not clamp indices, mutate roster internals, or swallow `IndexOutOfRangeException` for unrelated roster operations.
 
 ## v1.7.1 compatibility preservation
 
-The Nexus v1.7.1 package was used as the behavioral baseline. v1.7.2 retains the validated summoned-agent conversion patch, source-culture promoted naming, pre-inquiry name enforcement, module dependencies, and diagnostics. The v1.7.1 `Stack<T>` metadata workaround is no longer required because the source no longer uses `Stack<T>` for promotion context storage.
+The supplied Nexus v1.7.1 package was used as the behavioral baseline. v1.7.2 retains its module layout and dependencies, the validated summoned-agent conversion patch, source-culture promoted naming, pre-inquiry name enforcement, and `DSFix.log` diagnostics. The v1.7.1 `Stack<T>` metadata workaround is no longer required because the rebuilt source does not use `Stack<T>` for promotion context storage.
+
+## CI validation
+
+GitHub Actions restores and builds both DSFix assemblies as `net472` against the Bannerlord 1.3.15 reference assemblies, then validates required compatibility hooks, exact flee-target scoping, the absence of the v1.7.1 `Stack<T>` regression, and release-package structure.
 
 ## Remaining runtime uncertainty
 
-The Bannerlord process and the user's exact Distinguished Service/TOR runtime cannot be executed in CI. CI builds against the published Bannerlord 1.3.15.110062 reference assemblies and validates the release layout and patch targets statically. The reported `FleeToOtherClanLord(MapEventParty, CharacterObject)` signature is taken directly from the supplied crash stack.
+The Bannerlord process and the reporter's exact Distinguished Service/TOR runtime cannot be executed in CI. A real in-game reproduction of the lord-promotion flee case remains the final runtime proof. The compatibility guard is intentionally scoped to the exact stack path reported so that this uncertainty does not justify a broader roster rewrite.
