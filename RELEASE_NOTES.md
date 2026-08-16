@@ -4,6 +4,6 @@ Fixes the Distinguished Service lord-promotion/flee crash reported on Bannerlord
 
 `TroopRoster.AddToCountsAtIndex -> TroopRoster.RemoveTroop -> PromotionManager.FleeToOtherClanLord -> PromotionManager.MapEventEnded`
 
-The fix is scoped to the failing Distinguished Service path. If the ended map-event roster has already removed the fleeing wanderer, DSFix treats the redundant removal as complete and allows the rest of the feature to continue. A narrow fallback handles the same native `IndexOutOfRangeException` if the roster changes between the preflight and removal.
+The compatibility guard is scoped to the exact wanderer and exact ended `MapEventParty.Troops` roster from `FleeToOtherClanLord`. If that troop is already absent, the redundant removal is treated as complete. If native removal for that same exact pair still reaches a stale/invalid roster index and throws `IndexOutOfRangeException`, DSFix contains that exception so the remaining Distinguished Service flee logic can continue. Other roster operations retain native behavior.
 
-This release also synchronizes GitHub with the Nexus v1.7.1 behavior, retaining the TOR summoned-agent post-battle fix and culture-accurate promoted names, and adds reproducible CI/release packaging.
+This release also synchronizes GitHub with the supplied Nexus v1.7.1 baseline, retaining the TOR summoned-agent post-battle fix and culture-accurate promoted names, and adds reproducible CI/release packaging.
