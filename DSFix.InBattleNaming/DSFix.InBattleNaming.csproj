@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>DSFix</AssemblyName>
+    <AssemblyName>DSFix.InBattleNaming</AssemblyName>
     <RootNamespace>DSFix</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Description>Distinguished Service compatibility patch for The Old Realms: War in the Mountains</Description>
+    <Description>Culture-accurate promoted troop names for Distinguished Service and The Old Realms</Description>
     <Company>xmarre</Company>
     <Authors>xmarre</Authors>
     <Copyright>Copyright © xmarre 2026</Copyright>
