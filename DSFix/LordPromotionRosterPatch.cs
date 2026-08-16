@@ -15,7 +15,7 @@ namespace DSFix
         private static bool _patched;
 
         [ThreadStatic]
-        private static int _fleeToOtherClanLordDepth;
+        private static FleeContext _currentFlee;
 
         internal static void TryPatch(Harmony harmony)
         {
@@ -35,9 +35,8 @@ namespace DSFix
                 MethodInfo flee = FindFleeToOtherClanLord(managerType);
                 MethodInfo removeTroop = FindRemoveTroop(troopRosterType);
 
-                // Patch the guarded RemoveTroop hook first. If the FleeToOtherClanLord hook cannot
-                // be installed afterwards, the RemoveTroop hook remains behaviorally inert because
-                // the thread-local flee depth never becomes positive.
+                // Install the globally visible hook first. It remains behaviorally inert unless the
+                // exact FleeToOtherClanLord call has established a thread-local target context.
                 harmony.Patch(removeTroop,
                     prefix: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(RemoveTroopPrefix)),
                     finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(RemoveTroopFinalizer)));
@@ -86,38 +85,52 @@ namespace DSFix
             return matches[0];
         }
 
-        private static void FleePrefix()
+        private static void FleePrefix(object __0, object __1)
         {
-            _fleeToOtherClanLordDepth++;
+            FleeContext context = new FleeContext
+            {
+                Previous = _currentFlee,
+                Wanderer = __1,
+                Roster = ReflectionUtil.ReadMember(__0, "Troops")
+            };
+            _currentFlee = context;
         }
 
         private static Exception FleeFinalizer(Exception __exception)
         {
-            if (_fleeToOtherClanLordDepth > 0)
-                _fleeToOtherClanLordDepth--;
+            FleeContext context = _currentFlee;
+            _currentFlee = context?.Previous;
             return __exception;
         }
 
         private static bool RemoveTroopPrefix(object __instance, object __0, int __1)
         {
-            if (_fleeToOtherClanLordDepth <= 0 || __instance == null || __0 == null || __1 <= 0)
+            if (__1 <= 0 || !MatchesCurrentFleeTarget(__instance, __0))
                 return true;
 
             bool? contains = TryContainsTroop(__instance, __0);
             if (contains != false)
                 return true;
 
-            DSLog.Write("Skipped Distinguished Service's stale lord-promotion roster removal because the fleeing wanderer was already absent from the map-event TroopRoster.");
+            DSLog.Write("Skipped Distinguished Service's stale lord-promotion roster removal because the fleeing wanderer was already absent from the exact map-event TroopRoster.");
             return false;
         }
 
         private static Exception RemoveTroopFinalizer(Exception __exception, object __instance, object __0)
         {
-            if (_fleeToOtherClanLordDepth <= 0 || !(__exception is IndexOutOfRangeException))
+            if (!(__exception is IndexOutOfRangeException) || !MatchesCurrentFleeTarget(__instance, __0))
                 return __exception;
 
-            DSLog.Write("Suppressed the narrow TroopRoster.RemoveTroop IndexOutOfRangeException inside DistinguishedService.PromotionManager.FleeToOtherClanLord after the roster changed between preflight and native removal.");
+            DSLog.Write("Suppressed the target TroopRoster.RemoveTroop IndexOutOfRangeException for the exact wanderer/roster pair inside DistinguishedService.PromotionManager.FleeToOtherClanLord after the roster changed between preflight and native removal.");
             return null;
+        }
+
+        private static bool MatchesCurrentFleeTarget(object roster, object troop)
+        {
+            FleeContext context = _currentFlee;
+            if (context == null || roster == null || troop == null || !ReferenceEquals(troop, context.Wanderer))
+                return false;
+            return context.Roster == null || ReferenceEquals(roster, context.Roster);
         }
 
         private static bool? TryContainsTroop(object roster, object troop)
@@ -151,6 +164,13 @@ namespace DSFix
         {
             TargetInvocationException tie = ex as TargetInvocationException;
             return tie?.InnerException ?? ex;
+        }
+
+        private sealed class FleeContext
+        {
+            internal FleeContext Previous;
+            internal object Wanderer;
+            internal object Roster;
         }
     }
 }
