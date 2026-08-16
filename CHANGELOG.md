@@ -2,9 +2,9 @@
 
 ## 1.7.2
 
-- Fixed the `System.IndexOutOfRangeException` from `TroopRoster.AddToCountsAtIndex` / `TroopRoster.RemoveTroop` when Distinguished Service's `PromotionManager.FleeToOtherClanLord` processes a wanderer that is already absent from the ended map-event roster.
-- Scoped the fix to `FleeToOtherClanLord`: unrelated `TroopRoster.RemoveTroop` calls retain native behavior.
-- Added a preflight that skips only an already-satisfied removal and a narrow `IndexOutOfRangeException` fallback for a roster change between preflight and the native removal call.
+- Fixed the reported `System.IndexOutOfRangeException` from `TroopRoster.AddToCountsAtIndex` / `TroopRoster.RemoveTroop` inside Distinguished Service's `PromotionManager.FleeToOtherClanLord` path after the ended map-event roster has changed.
+- Scoped the compatibility guard to the exact wanderer and exact `MapEventParty.Troops` roster captured by `FleeToOtherClanLord`; unrelated `TroopRoster.RemoveTroop` calls retain native behavior.
+- Added a preflight that skips an already-satisfied removal when that exact wanderer is absent, plus a narrow `IndexOutOfRangeException` fallback for the same exact target if native removal still resolves a stale/invalid roster index.
 - Rebuilt the repository from the Nexus v1.7.1 behavior so GitHub now contains the current TOR summoned-agent and promoted-name compatibility code instead of the obsolete 2025 source snapshot.
 - Removed the v1.7.1 `ThreadLocal<Stack<object[]>>` implementation detail entirely; promotion naming now uses a thread-static linked context and therefore no longer needs the binary metadata rewrite that v1.7.1 required on Bannerlord 1.3.15.
 - Added reproducible GitHub Actions build/validation and automatic GitHub release packaging for Bannerlord 1.3.15.
