@@ -49,21 +49,15 @@ def main() -> None:
     if re.search(r"\bStack\s*<", source):
         fail("Stack<T> reintroduced into DSFix.dll source; this regresses the v1.7.1 Bannerlord 1.3.15 loader failure")
 
-    finalizer_block = re.search(r"RemoveTroopFinalizer\(.*?\n\s*}\n", source, re.S)
-    if (
-        not finalizer_block
-        or "IndexOutOfRangeException" not in finalizer_block.group(0)
-        or "MatchesCurrentFleeTarget" not in finalizer_block.group(0)
+    for required in (
+        "private static Exception RemoveTroopFinalizer",
+        "__exception is IndexOutOfRangeException",
+        "MatchesCurrentFleeTarget(__instance, __0)",
+        "ReferenceEquals(troop, context.Wanderer)",
+        "ReferenceEquals(roster, context.Roster)",
     ):
-        fail("lord-promotion exception fallback is not scoped to the exact flee target")
-
-    target_block = re.search(r"MatchesCurrentFleeTarget\(.*?\n\s*}\n", source, re.S)
-    if (
-        not target_block
-        or "ReferenceEquals(troop, context.Wanderer)" not in target_block.group(0)
-        or "ReferenceEquals(roster, context.Roster)" not in target_block.group(0)
-    ):
-        fail("lord-promotion roster guard does not bind both the exact wanderer and map-event roster")
+        if required not in source:
+            fail(f"lord-promotion exact-target guard missing: {required}")
 
     naming_source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix.InBattleNaming").glob("*.cs"))
     for required in ("AssignSkills", "AssignSkillsRandomly", "GetNameSuffix", "PromoteUnit"):
