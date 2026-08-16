@@ -106,7 +106,7 @@ namespace DSFix
         {
             if (original == null)
                 return;
-            PatchInfo info = Harmony.GetPatchInfo(original);
+            var info = Harmony.GetPatchInfo(original);
             if (info != null && info.Owners.Contains(HarmonyId))
                 return;
 
