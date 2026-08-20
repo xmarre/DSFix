@@ -1,6 +1,32 @@
-# DSFix v1.7.2 validation
+# DSFix v1.7.3 validation
 
-## Reported failure
+## v1.7.3 promoted-name startup failure
+
+A Bannerlord 1.3.15 + TOR WiTM 1.16 runtime reported:
+
+`System.MissingMethodException: get_using_extern_namelist()`
+
+from:
+
+`DSFix.LoreNamePatch.FindExternalNamesGetter -> DSFix.LoreNamePatch.TryPatch -> DSFix.SubModule.TryPatchLoadedTargets`
+
+### Root cause
+
+`LoreNamePatch` treated `DistinguishedService.PromotionManager.get_using_extern_namelist()` as a mandatory target before applying any of the TOR promoted-name patches. Some Distinguished Service builds do not expose that getter. Because target discovery threw before Harmony patching began, the complete `LoreNamePatch` set was rejected even though the required promotion, first-name, and suffix targets were available.
+
+The external-name-list hook is not required for DSFix's direct source-culture naming enforcement. `DSFix.InBattleNaming` independently captures the promoted troop culture/title, assigns a culture-appropriate first name, patches `GetNameSuffix`, and enforces the corrected name before the skill inquiry.
+
+### v1.7.3 fix
+
+- `FindExternalNamesGetter` now returns `null` when the getter is absent instead of throwing `MissingMethodException`.
+- Harmony patches `get_using_extern_namelist()` only when the method actually exists.
+- `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` remain mandatory and continue to fail closed on ambiguous/missing targets.
+- Startup logging distinguishes an unavailable optional external-list hook from a failed promoted-name patch set.
+- Release validation asserts that the getter remains optional.
+
+This keeps compatibility strict around the actual naming entry points while avoiding a false hard dependency on one Distinguished Service implementation detail.
+
+## Reported v1.7.2 lord-promotion failure
 
 `System.IndexOutOfRangeException` originates in `TaleWorlds.CampaignSystem.Roster.TroopRoster.AddToCountsAtIndex`, called by `TroopRoster.RemoveTroop`, from `DistinguishedService.PromotionManager.FleeToOtherClanLord(MapEventParty, CharacterObject)` during `PromotionManager.MapEventEnded`.
 
@@ -33,14 +59,16 @@ A TOR summoned-agent cast failure is not this reported path: the stack reaches `
 
 A global `TroopRoster` corruption workaround was rejected. The patch does not clamp indices, mutate roster internals, or swallow `IndexOutOfRangeException` for unrelated roster operations.
 
-## v1.7.1 compatibility preservation
+## Compatibility preservation
 
-The supplied Nexus v1.7.1 package was used as the behavioral baseline. v1.7.2 retains its module layout and dependencies, the validated summoned-agent conversion patch, source-culture promoted naming, pre-inquiry name enforcement, and `DSFix.log` diagnostics. The v1.7.1 `Stack<T>` metadata workaround is no longer required because the rebuilt source does not use `Stack<T>` for promotion context storage.
+v1.7.3 retains the v1.7.2 module layout and dependencies, the validated summoned-agent conversion patch, the exact-target lord-promotion roster guard, source-culture promoted naming, pre-inquiry name enforcement, and `DSFix.log` diagnostics.
+
+The v1.7.1 `Stack<T>` metadata workaround remains unnecessary because the rebuilt source does not use `Stack<T>` for promotion context storage.
 
 ## CI validation
 
-GitHub Actions restores and builds both DSFix assemblies as `net472` against the Bannerlord 1.3.15 reference assemblies, then validates required compatibility hooks, exact flee-target scoping, the absence of the v1.7.1 `Stack<T>` regression, and release-package structure.
+GitHub Actions restores and builds both DSFix assemblies as `net472` against the Bannerlord 1.3.15 reference assemblies, then validates required compatibility hooks, exact flee-target scoping, optional external-name getter handling, the absence of the v1.7.1 `Stack<T>` regression, and release-package structure.
 
 ## Remaining runtime uncertainty
 
-The Bannerlord process and the reporter's exact Distinguished Service/TOR runtime cannot be executed in CI. A real in-game reproduction of the lord-promotion flee case remains the final runtime proof. The compatibility guard is intentionally scoped to the exact stack path reported so that this uncertainty does not justify a broader roster rewrite.
+The Bannerlord process and the reporter's exact Distinguished Service/TOR runtime cannot be executed in CI. CI validates compilation, patch structure, and packaging. The supplied runtime error directly proves the missing-getter compatibility failure; a real in-game promotion remains the final runtime proof that the affected Distinguished Service build follows the corrected path without another version-specific mismatch.

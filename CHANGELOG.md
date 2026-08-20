@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.3
+
+- Fixed the startup warning/error `System.MissingMethodException: get_using_extern_namelist()` from `DSFix.LoreNamePatch.FindExternalNamesGetter` on Distinguished Service builds that do not expose that property getter.
+- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-troop naming patch set.
+- The core `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` hooks now continue to patch when `get_using_extern_namelist()` is absent.
+- Preserved the separate direct pre-inquiry naming enforcement in `DSFix.InBattleNaming`, so source-culture promoted names do not depend on the external-name-list getter existing.
+- Added release validation that rejects reintroducing a mandatory external-name-list getter dependency.
+
 ## 1.7.2
 
 - Fixed the reported `System.IndexOutOfRangeException` from `TroopRoster.AddToCountsAtIndex` / `TroopRoster.RemoveTroop` inside Distinguished Service's `PromotionManager.FleeToOtherClanLord` path after the ended map-event roster has changed.
