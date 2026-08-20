@@ -51,8 +51,11 @@ namespace DSFix
                     _harmony.Patch(firstName,
                         prefix: new HarmonyMethod(typeof(LoreNamePatch), nameof(FirstNamePrefix)),
                         finalizer: new HarmonyMethod(typeof(LoreNamePatch), nameof(FirstNameFinalizer)));
-                    _harmony.Patch(externalNamesGetter,
-                        prefix: new HarmonyMethod(typeof(LoreNamePatch), nameof(ExternalNamesPrefix)));
+                    if (externalNamesGetter != null)
+                    {
+                        _harmony.Patch(externalNamesGetter,
+                            prefix: new HarmonyMethod(typeof(LoreNamePatch), nameof(ExternalNamesPrefix)));
+                    }
                     _harmony.Patch(suffix,
                         prefix: new HarmonyMethod(typeof(LoreNamePatch), nameof(SuffixPrefix)));
                 }
@@ -65,7 +68,9 @@ namespace DSFix
 
                 _patched = true;
                 DSLog.Write(
-                    "TOR promoted-troop naming patches applied: source-culture name pool, external-list bypass, and localized troop-title suffix. Targets: " +
+                    "TOR promoted-troop naming patches applied: source-culture name pool" +
+                    (externalNamesGetter != null ? ", external-list bypass" : ", external-list getter not present; optional bypass hook skipped") +
+                    ", and localized troop-title suffix. Targets: " +
                     promoteUnit.DeclaringType.FullName + ".PromoteUnit, " + firstName.DeclaringType.FullName + ".GenerateHeroFirstName, " +
                     suffix.DeclaringType.FullName + ".GetNameSuffix.", true);
             }
@@ -122,11 +127,9 @@ namespace DSFix
             MethodInfo[] matches = managerType.GetMethods(ReflectionUtil.AllInstance)
                 .Where(m => m.Name == "get_using_extern_namelist" && m.GetParameters().Length == 0 && m.ReturnType == typeof(bool))
                 .ToArray();
-            if (matches.Length != 1)
-                throw new MissingMethodException(matches.Length > 1
-                    ? "Multiple get_using_extern_namelist methods were found."
-                    : "get_using_extern_namelist()");
-            return matches[0];
+            if (matches.Length > 1)
+                throw new MissingMethodException("Multiple get_using_extern_namelist methods were found.");
+            return matches.Length == 1 ? matches[0] : null;
         }
 
         private static MethodInfo FindFirstNameTarget(Type nameGeneratorType)
