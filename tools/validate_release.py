@@ -63,9 +63,13 @@ def main() -> None:
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
         "if (externalNamesGetter != null)",
         "return matches.Length == 1 ? matches[0] : null;",
+        'private const string ExternalNamesMemberName = "using_extern_namelist";',
+        "ReflectionUtil.ReadMember(__instance, ExternalNamesMemberName)",
+        "ReflectionUtil.WriteMember(__instance, ExternalNamesMemberName, false)",
+        "ReflectionUtil.WriteMember(context.ExternalNamesOwner, ExternalNamesMemberName, context.ExternalNamesOriginalValue)",
     ):
         if required not in source:
-            fail(f"optional external-name getter compatibility guard missing: {required}")
+            fail(f"optional external-name compatibility guard missing: {required}")
 
     naming_source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix.InBattleNaming").glob("*.cs"))
     for required in ("AssignSkills", "AssignSkillsRandomly", "GetNameSuffix", "PromoteUnit"):
