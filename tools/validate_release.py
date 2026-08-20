@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.2"
+EXPECTED_VERSION = "1.7.3"
 
 
 def fail(message: str) -> None:
@@ -58,6 +58,14 @@ def main() -> None:
     ):
         if required not in source:
             fail(f"lord-promotion exact-target guard missing: {required}")
+
+    for required in (
+        "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
+        "if (externalNamesGetter != null)",
+        "return matches.Length == 1 ? matches[0] : null;",
+    ):
+        if required not in source:
+            fail(f"optional external-name getter compatibility guard missing: {required}")
 
     naming_source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix.InBattleNaming").glob("*.cs"))
     for required in ("AssignSkills", "AssignSkillsRandomly", "GetNameSuffix", "PromoteUnit"):
