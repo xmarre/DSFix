@@ -1,9 +1,11 @@
-## DSFix v1.7.2
+## DSFix v1.7.3
 
-Fixes the Distinguished Service lord-promotion/flee crash reported on Bannerlord 1.3.15 + TOR WiTM 1.16:
+Fixes the promoted-troop naming patch failing to initialize on Distinguished Service builds that do not expose:
 
-`TroopRoster.AddToCountsAtIndex -> TroopRoster.RemoveTroop -> PromotionManager.FleeToOtherClanLord -> PromotionManager.MapEventEnded`
+`PromotionManager.get_using_extern_namelist()`
 
-The compatibility guard is scoped to the exact wanderer and exact ended `MapEventParty.Troops` roster from `FleeToOtherClanLord`. If that troop is already absent, the redundant removal is treated as complete. If native removal for that same exact pair still reaches a stale/invalid roster index and throws `IndexOutOfRangeException`, DSFix contains that exception so the remaining Distinguished Service flee logic can continue. Other roster operations retain native behavior.
+v1.7.2 treated that getter as a mandatory Harmony target. When it was absent, `LoreNamePatch.FindExternalNamesGetter` threw `MissingMethodException` before the remaining TOR naming hooks could be applied.
 
-This release also synchronizes GitHub with the supplied Nexus v1.7.1 baseline, retaining the TOR summoned-agent post-battle fix and culture-accurate promoted names, and adds reproducible CI/release packaging.
+v1.7.3 makes the external-name-list bypass optional. The core `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` patches still apply when the getter is absent, and the separate `DSFix.InBattleNaming` module continues to enforce the culture-appropriate promoted name before the skill inquiry.
+
+The TOR summoned-agent post-battle fix and the exact-target `FleeToOtherClanLord` roster crash guard from v1.7.2 are unchanged.
