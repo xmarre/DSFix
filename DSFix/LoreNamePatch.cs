@@ -13,6 +13,7 @@ namespace DSFix
         private const string CharacterObjectTypeName = "TaleWorlds.CampaignSystem.CharacterObject";
         private const string HeroTypeName = "TaleWorlds.CampaignSystem.Hero";
         private const string NameGeneratorTypeName = "TaleWorlds.CampaignSystem.NameGenerator";
+        private const string ExternalNamesMemberName = "using_extern_namelist";
         private static readonly object PatchLock = new object();
         private static readonly object MissingPoolLock = new object();
         private static readonly HashSet<string> MissingPoolsLogged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -68,11 +69,10 @@ namespace DSFix
 
                 _patched = true;
                 DSLog.Write(
-                    "TOR promoted-troop naming patches applied: source-culture name pool" +
-                    (externalNamesGetter != null ? ", external-list bypass" : ", external-list getter not present; optional bypass hook skipped") +
-                    ", and localized troop-title suffix. Targets: " +
+                    "TOR promoted-troop naming patches applied: source-culture name pool, external-list bypass compatibility, and localized troop-title suffix. Targets: " +
                     promoteUnit.DeclaringType.FullName + ".PromoteUnit, " + firstName.DeclaringType.FullName + ".GenerateHeroFirstName, " +
-                    suffix.DeclaringType.FullName + ".GetNameSuffix.", true);
+                    suffix.DeclaringType.FullName + ".GetNameSuffix. Optional get_using_extern_namelist hook: " +
+                    (externalNamesGetter != null ? "present" : "absent; member-level promotion guard remains active") + ".", true);
             }
         }
 
@@ -148,17 +148,50 @@ namespace DSFix
             return matches[0];
         }
 
-        private static void PromotionPrefix(object __0)
+        private static void PromotionPrefix(object __instance, object __0)
         {
             PromotionContext context = BuildContext(__0);
             context.Previous = _current;
             _current = context;
+
+            if (!context.Active || __instance == null)
+                return;
+
+            try
+            {
+                object value = ReflectionUtil.ReadMember(__instance, ExternalNamesMemberName);
+                if (value is bool enabled && enabled && ReflectionUtil.WriteMember(__instance, ExternalNamesMemberName, false))
+                {
+                    context.ExternalNamesOwner = __instance;
+                    context.ExternalNamesOriginalValue = true;
+                    context.ExternalNamesTemporarilyDisabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                DSLog.Write("Failed open while temporarily disabling Distinguished Service's external name list: " + ex.Message);
+            }
         }
 
         private static Exception PromotionFinalizer(Exception __exception)
         {
             PromotionContext context = _current;
-            _current = context?.Previous;
+            try
+            {
+                if (context != null && context.ExternalNamesTemporarilyDisabled && context.ExternalNamesOwner != null)
+                {
+                    if (!ReflectionUtil.WriteMember(context.ExternalNamesOwner, ExternalNamesMemberName, context.ExternalNamesOriginalValue))
+                        DSLog.Write("Failed to restore Distinguished Service's external-name-list setting after TOR promotion.");
+                }
+            }
+            catch (Exception ex)
+            {
+                DSLog.Write("Failed to restore Distinguished Service's external-name-list setting after TOR promotion: " + ex.Message);
+            }
+            finally
+            {
+                _current = context?.Previous;
+            }
             return __exception;
         }
 
@@ -288,6 +321,9 @@ namespace DSFix
             internal bool IsFemale;
             internal string TroopTitle;
             internal bool Active;
+            internal object ExternalNamesOwner;
+            internal bool ExternalNamesOriginalValue;
+            internal bool ExternalNamesTemporarilyDisabled;
         }
     }
 }
