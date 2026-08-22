@@ -134,7 +134,7 @@ namespace DSFix
 
         private static MethodInfo FindFirstNameTarget(Type nameGeneratorType)
         {
-            MethodInfo[] matches = nameGeneratorType.GetMethods(ReflectionUtil.AllStatic)
+            MethodInfo[] matches = nameGeneratorType.GetMethods(ReflectionUtil.AllInstance)
                 .Where(m => m.Name == "GenerateHeroFirstName")
                 .Where(m =>
                 {
