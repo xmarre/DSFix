@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.3"
+EXPECTED_VERSION = "1.7.4"
 
 
 def fail(message: str) -> None:
@@ -70,6 +70,20 @@ def main() -> None:
     ):
         if required not in source:
             fail(f"optional external-name compatibility guard missing: {required}")
+
+    lore_source = (ROOT / "DSFix" / "LoreNamePatch.cs").read_text(encoding="utf-8")
+    first_name_target = re.search(
+        r"private static MethodInfo FindFirstNameTarget\(Type nameGeneratorType\)(.*?)private static void PromotionPrefix",
+        lore_source,
+        re.S,
+    )
+    if not first_name_target:
+        fail("could not locate FindFirstNameTarget for Bannerlord 1.3.15 validation")
+    first_name_body = first_name_target.group(1)
+    if "nameGeneratorType.GetMethods(ReflectionUtil.AllInstance)" not in first_name_body:
+        fail("GenerateHeroFirstName target is not bound as an instance method for Bannerlord 1.3.15")
+    if "ReflectionUtil.AllStatic" in first_name_body:
+        fail("GenerateHeroFirstName target regressed to static lookup; Bannerlord 1.3.15 exposes it as an instance method")
 
     naming_source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix.InBattleNaming").glob("*.cs"))
     for required in ("AssignSkills", "AssignSkillsRandomly", "GetNameSuffix", "PromoteUnit"):
