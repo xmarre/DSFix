@@ -2,7 +2,7 @@
 <Module>
   <Name value="DSFix - Distinguished Service 1.3.x / TOR WiTM" />
   <Id value="DSFix" />
-  <Version value="v1.7.3" />
+  <Version value="v1.7.4" />
   <SingleplayerModule value="true" />
   <MultiplayerModule value="false" />
   <DependedModules>
