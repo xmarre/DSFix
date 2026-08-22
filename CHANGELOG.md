@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.4
+
+- Fixed `System.MissingMethodException: GenerateHeroFirstName(Hero)` from `DSFix.LoreNamePatch.FindFirstNameTarget` when starting a Bannerlord 1.3.15 campaign.
+- Corrected the Harmony target lookup to match Bannerlord 1.3.15's actual API: `NameGenerator.GenerateHeroFirstName(Hero)` is an instance method, not a static method.
+- Added release validation that rejects changing the Bannerlord 1.3.15 first-name target back to a static lookup.
+- Preserved the v1.7.3 optional external-name-list compatibility path, the TOR summoned-agent post-battle fix, the promoted-name enforcement, and the exact-target `FleeToOtherClanLord` roster crash guard.
+
 ## 1.7.3
 
 - Fixed the startup warning/error `System.MissingMethodException: get_using_extern_namelist()` from `DSFix.LoreNamePatch.FindExternalNamesGetter` on Distinguished Service builds that do not expose that property getter.
