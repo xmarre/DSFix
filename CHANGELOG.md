@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.5
+
+- Fixed Distinguished Service promotions losing TOR races when a culture contains wanderer templates from a different race, including wraith/undead promotions becoming human and the associated malformed body/head combinations.
+- Root cause: `PromotionManager.PromoteUnit` selects a wanderer template by culture/sex and `HeroCreator.CreateSpecialHero` clones that template's `Race`, `BodyPropertyRange`, and wanderer age path. Distinguished Service later copies culture/equipment/skills, but never restores the promoted troop's race/body identity.
+- The compatibility hook now scopes itself to the exact `PromoteUnit -> CreateSpecialHero -> CreateHero` call. When the selected wanderer race differs from the source troop, the hero clone receives the source race/body range before hero initialization, and Bannerlord temporarily sees the source troop as `OriginalCharacter` while it derives culture/static body properties.
+- The temporary `OriginalCharacter` substitution is always restored to Distinguished Service's wanderer origin after `CreateSpecialHero`, including exception paths, so companion occupation/template behavior and save-load initialization remain Distinguished Service-compatible.
+- Fixed the related custom-race age mismatch. Distinguished Service's requested 20-49 age is clamped to the source troop's valid body-property age range and evaluated through the active `HeroCreationModel`, preventing exact-age TOR bodies such as wraith/skeleton/vampire from inheriting an unrelated wanderer's age.
+- Added campaign persistence for corrected promotions. DSFix saves each tracked companion's current race and `BodyPropertyRange` ID, reapplies them on session launch after Bannerlord reconstructs the hero from its wanderer origin, and refreshes the stored values immediately before save so intentional later race/body changes remain persistent.
+- Existing malformed companions created before v1.7.5 are not guessed or rewritten automatically because the original promoted troop identity is not recoverable safely from the finished hero.
+- Added release validation for the one-shot promotion scope, exact template match, temporary-origin restoration, source-compatible age path, and save/load race/body persistence.
+
 ## 1.7.4
 
 - Fixed `System.MissingMethodException: GenerateHeroFirstName(Hero)` from `DSFix.LoreNamePatch.FindFirstNameTarget` when starting a Bannerlord 1.3.15 campaign.
