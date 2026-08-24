@@ -1,6 +1,8 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using TaleWorlds.CampaignSystem;
+using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
 namespace DSFix
@@ -21,6 +23,15 @@ namespace DSFix
             AppDomain.CurrentDomain.AssemblyLoad += _assemblyLoadHandler;
         }
 
+        protected override void InitializeGameStarter(Game game, IGameStarter starterObject)
+        {
+            base.InitializeGameStarter(game, starterObject);
+
+            CampaignGameStarter campaignStarter = starterObject as CampaignGameStarter;
+            if (campaignStarter != null)
+                campaignStarter.AddBehavior(new PromotionIdentityCampaignBehavior());
+        }
+
         protected override void OnSubModuleUnloaded()
         {
             if (_assemblyLoadHandler != null)
@@ -29,6 +40,7 @@ namespace DSFix
                 _assemblyLoadHandler = null;
             }
 
+            try { PromotionIdentityPatch.Reset(); } catch (Exception ex) { DSLog.Write("Failed to clear promoted-troop identity context: " + ex.Message); }
             try { LoreNamePatch.Reset(); } catch (Exception ex) { DSLog.Write("Failed to clear promoted-troop naming context: " + ex.Message); }
             try { _harmony?.UnpatchAll(HarmonyId); } catch { }
             base.OnSubModuleUnloaded();
@@ -49,6 +61,9 @@ namespace DSFix
 
             try { LordPromotionRosterPatch.TryPatch(_harmony); }
             catch (Exception ex) { DSLog.Write("Lord-promotion roster patch failed: " + ex, true); }
+
+            try { PromotionIdentityPatch.TryPatch(); }
+            catch (Exception ex) { DSLog.Write("TOR promoted-troop identity patches were not applied: " + ex, true); }
 
             try { LoreNamePatch.TryPatch(); }
             catch (Exception ex) { DSLog.Write("TOR promoted-troop naming patches were not applied: " + ex, true); }

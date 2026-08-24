@@ -1,67 +1,93 @@
-# DSFix v1.7.4 validation
+# DSFix v1.7.5 validation
 
-## v1.7.4 Bannerlord 1.3.15 NameGenerator startup failure
+## Reported TOR promoted-race failure
 
-A Bannerlord 1.3.15 + TOR WiTM 1.16 runtime reported while starting a new campaign:
+### Symptom
 
-`System.MissingMethodException: GenerateHeroFirstName(Hero)`
+A TOR troop promoted through Distinguished Service can become a companion with a different race from the source troop. Reported cases include a wraith becoming human, Blood Dragon/Drakenhof promotions becoming human, and malformed undead bodies such as an ethereal/skeletal body with a human or child-sized head.
 
-from:
+### Trigger
 
-`DSFix.LoreNamePatch.FindFirstNameTarget -> DSFix.LoreNamePatch.TryPatch -> DSFix.SubModule.TryPatchLoadedTargets`
+The failure is possible when the promoted troop's TOR culture contains a Distinguished Service-compatible wanderer template whose `Race` differs from the source troop's `Race`.
+
+### Contributing path
+
+Distinguished Service's `PromotionManager.PromoteUnit(CharacterObject co, ...)`:
+
+1. selects `wanderer` from `co.Culture.NotableAndWandererTemplates` using occupation, sex, and civilian-equipment checks;
+2. falls back to a player-culture wanderer if no culture-local template is found;
+3. calls `HeroCreator.CreateSpecialHero(wanderer, ..., rand.Next(20, 50))`;
+4. later copies the source troop's culture, formation, equipment, level, and skills.
+
+The selection predicate does not compare `Race`.
+
+Bannerlord 1.3.15 `HeroCreator.CreateSpecialHero` clones the selected template through `CharacterObject.CreateFrom`. `BasicCharacterObject.FillFrom` copies `BodyPropertyRange`, `Race`, and the template age into the clone. The clone also retains the selected wanderer as `OriginalCharacter`.
+
+Bannerlord's default hero creation then derives culture and static body properties from that `OriginalCharacter`. For a wanderer template, `DefaultHeroCreationModel.GetBirthAndDeathDay` uses the wanderer's age instead of the age argument passed by Distinguished Service.
+
+TOR's race data confirms that several custom bodies require specific ages; examples in `tor_bodyproperties.xml` include wraith and skeleton at age 25 and vampire at age 22.
 
 ### Root cause
 
-The failure was in DSFix's reflection target lookup. `FindFirstNameTarget` searched `TaleWorlds.CampaignSystem.NameGenerator` using static binding flags.
+The promoted hero is initialized from the **wanderer template's identity**, while Distinguished Service only copies a subset of source troop data after hero initialization. In a multi-race TOR culture this violates the required invariant:
 
-Bannerlord 1.3.15 exposes the relevant method as:
+> A companion promoted from a troop must be initialized with a race, race-specific body range, and compatible age belonging to that source troop.
 
-`public TextObject NameGenerator.GenerateHeroFirstName(Hero hero)`
+Culture/equipment reassignment after `CreateSpecialHero` cannot repair an already-generated body.
 
-It is an **instance method**. Therefore the method existed in the target game assembly, but DSFix's static-only lookup could never find it and reported a misleading `MissingMethodException`.
+### Alternative hypotheses
 
-The Bannerlord 1.3.15 decompiled API also shows `GenerateHeroNameAndHeroFullName(...)` calling `this.GenerateHeroFirstName(hero)`, independently confirming the instance semantics.
+- The existing DSFix name patches are not the cause. They temporarily change culture for name generation and do not write `Race`.
+- Equipment copying is not the cause. Race/body fields are already cloned from the wanderer before Distinguished Service replaces battle/civilian equipment.
+- Excluding wraiths from promotion avoids one trigger but leaves every other multi-race TOR culture exposed to the same template-selection defect.
+- Permanently replacing the hero's `OriginalCharacter` with the source troop was rejected: Bannerlord restores occupation and other template fields from that origin after load, which would turn a Distinguished Service wanderer companion back into a soldier-template character.
 
-### v1.7.4 fix
+## v1.7.5 fix
 
-- `FindFirstNameTarget` now enumerates `NameGenerator` instance methods.
-- It still requires exactly one `GenerateHeroFirstName(Hero)` target and fails closed if the target is missing or ambiguous.
-- The existing prefix/finalizer remains valid because Harmony maps `__0` to the method's `Hero` argument; the patch does not require the `NameGenerator` instance itself.
-- Release validation now inspects the `FindFirstNameTarget` body and rejects a regression to static binding.
+`PromotionIdentityPatch` scopes itself to the exact Distinguished Service promotion and claims only its first `CreateSpecialHero` call. A nested hero creation triggered later by an event cannot inherit the promotion context.
 
-## v1.7.3 external-name-list compatibility failure
+When the exact selected wanderer has the same race as the source troop, the new compatibility path does nothing.
 
-A previous runtime reported:
+When the races differ:
 
-`System.MissingMethodException: get_using_extern_namelist()`
+1. Distinguished Service's requested age is clamped to the source `BodyPropertyRange` age interval.
+2. Immediately before the private `HeroCreator.CreateHero` constructs the hero, DSFix asks the active `HeroCreationModel` for birth/death times using the source troop and the clamped age.
+3. Immediately after `CreateHero` returns, the new hero clone receives the source `Race` and `BodyPropertyRange`.
+4. The clone's private `_originCharacter` is temporarily changed from the selected wanderer to the source troop. This makes Bannerlord's normal initialization derive culture/static body properties from the correct TOR race without reimplementing the body generator.
+5. `CreateSpecialHero` postfix/finalizer restores the original wanderer origin on every normal/exception path.
+6. Only race/body identity remains corrected. Distinguished Service's wanderer occupation/template semantics and its later equipment/skill logic remain unchanged.
 
-from `DSFix.LoreNamePatch.FindExternalNamesGetter`.
+The patch matches the exact template reference handed from `CreateSpecialHero` into private `CreateHero`; unrelated `HeroCreator` calls remain native.
 
-v1.7.3 made that Distinguished Service getter optional. The getter is patched only when present, while the underlying `using_extern_namelist` member is temporarily disabled/restored around an active TOR promotion when available. That compatibility path remains unchanged in v1.7.4.
+## Save/load invariant
 
-## v1.7.2 lord-promotion roster failure
+Bannerlord's `CharacterObject.InitializeHeroCharacterOnAfterLoad` restores clone fields from the permanent wanderer origin. TOR already works around this for `Race` with its own campaign race map, while `BodyPropertyRange` is not covered by that TOR behavior.
 
-The reported stack was:
+`PromotionIdentityCampaignBehavior` therefore tracks only companions whose promotion required the race/body correction:
 
-`TroopRoster.AddToCountsAtIndex -> TroopRoster.RemoveTroop -> PromotionManager.FleeToOtherClanLord -> PromotionManager.MapEventEnded`
+- on promotion, capture the corrected hero's current race and `BodyPropertyRange.StringId`;
+- immediately before each save, refresh those values from the live hero;
+- on session launch, restore the saved race and body range after Bannerlord has reconstructed the hero.
 
-The compatibility guard remains scoped to the exact wanderer and exact `MapEventParty.Troops` roster captured by `FleeToOtherClanLord`. An already-absent exact troop makes the redundant removal a no-op; only an `IndexOutOfRangeException` from native removal for that same exact pair is contained. Other troops, rosters, removal calls, and exception types retain native behavior.
+Refreshing before save is intentional: a later legitimate race/body change is persisted instead of being overwritten with the original promoted troop forever.
 
-## Compatibility preservation
-
-v1.7.4 retains:
-
-- the three-target TOR summoned-agent `ShowBattleResults` conversion patch;
-- culture-accurate promoted first names and localized source-troop titles;
-- direct pre-inquiry name enforcement through `DSFix.InBattleNaming`;
-- the optional external-name-list compatibility path from v1.7.3;
-- the exact-target `FleeToOtherClanLord` roster guard from v1.7.2;
-- the thread-static linked promotion context that avoids the v1.7.1 `Stack<T>` loader regression.
+Pre-v1.7.5 malformed companions are not automatically inferred or rewritten. The finished hero does not contain a reliable source-troop identifier, and equipment/name heuristics would risk modifying unrelated companions.
 
 ## CI validation
 
-GitHub Actions restores and builds both DSFix assemblies as `net472` against the Bannerlord 1.3.15 reference assemblies, then validates required compatibility hooks, the instance `GenerateHeroFirstName(Hero)` lookup, optional external-name handling, exact flee-target scoping, absence of the `Stack<T>` regression, and release-package structure.
+GitHub Actions restores and builds both DSFix assemblies as `net472` against Bannerlord 1.3.15 reference assemblies. `tools/validate_release.py` checks:
+
+- the exact Distinguished Service promotion hook;
+- one-shot `CreateSpecialHero` claiming;
+- same-race no-op behavior;
+- exact template-reference matching for private `CreateHero`;
+- source `Race` / `BodyPropertyRange` application;
+- source-compatible age evaluation through `HeroCreationModel`;
+- temporary `_originCharacter` substitution plus restoration;
+- campaign `OnBeforeSaveEvent` / `OnSessionLaunchedEvent` persistence;
+- existing summoned-agent, naming, external-name-list, and lord-roster compatibility guards;
+- release version/package structure.
 
 ## Runtime boundary
 
-The supplied screenshot directly proves the v1.7.3 static-target lookup failure. The Bannerlord 1.3.15 API establishes the corrected instance-method signature. CI can validate compilation and patch structure, but a real Bannerlord run remains the final runtime check for the complete mod stack.
+The code path and data mismatch are established from Distinguished Service source, Bannerlord 1.3.15 source, TOR source/data, and the reported visual failure. CI can prove compilation and patch structure. A real Bannerlord 1.3.15 + TOR WiTM 1.16 promotion remains the final runtime check for rendered race/body behavior and save/reload behavior.
