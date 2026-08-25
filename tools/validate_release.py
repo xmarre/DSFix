@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.5"
+EXPECTED_VERSION = "1.7.6"
 
 
 def fail(message: str) -> None:
@@ -51,6 +51,7 @@ def main() -> None:
     if re.search(r"\bStack\s*<", source):
         fail("Stack<T> reintroduced into DSFix.dll source; this regresses the v1.7.1 Bannerlord 1.3.15 loader failure")
 
+    roster_source = (ROOT / "DSFix" / "LordPromotionRosterPatch.cs").read_text(encoding="utf-8")
     for required in (
         "private static Exception RemoveTroopFinalizer",
         "__exception is IndexOutOfRangeException",
@@ -58,8 +59,27 @@ def main() -> None:
         "ReferenceEquals(troop, context.Wanderer)",
         "ReferenceEquals(roster, context.Roster)",
     ):
-        if required not in source:
+        if required not in roster_source:
             fail(f"lord-promotion exact-target guard missing: {required}")
+
+    flee_finalizer = re.search(
+        r"private static Exception FleeFinalizer\(Exception __exception\)(.*?)private static bool RemoveTroopPrefix",
+        roster_source,
+        re.S,
+    )
+    if not flee_finalizer:
+        fail("could not locate FleeToOtherClanLord finalizer")
+    flee_finalizer_body = flee_finalizer.group(1)
+    for required in (
+        "_currentFlee = context?.Previous;",
+        "if (__exception is IndexOutOfRangeException)",
+        "return null;",
+        "return __exception;",
+    ):
+        if required not in flee_finalizer_body:
+            fail(f"FleeToOtherClanLord boundary guard missing: {required}")
+    if flee_finalizer_body.index("_currentFlee = context?.Previous;") > flee_finalizer_body.index("if (__exception is IndexOutOfRangeException)"):
+        fail("FleeToOtherClanLord context must be restored before exception suppression")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
