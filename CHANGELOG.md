@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.6
+
+- Fixed the `System.IndexOutOfRangeException` still escaping from `DistinguishedService.PromotionManager.FleeToOtherClanLord` on the live Distinguished Service 1.3.14 path after v1.7.2-v1.7.5.
+- The new runtime evidence shows the exception reaching `FleeToOtherClanLord_Patch1 -> MapEventEnded` without the previously assumed `TroopRoster.RemoveTroop -> AddToCountsAtIndex` frames. The v1.7.2 guard was therefore too narrow: it protected one known nested roster-removal operation, while another stale index operation inside the same post-map-event flee cleanup can also fail.
+- `FleeToOtherClanLord` now has an exact method-boundary finalizer that restores DSFix's thread-local context first, suppresses only `IndexOutOfRangeException` escaping that exact Distinguished Service cleanup method, and propagates every other exception unchanged.
+- The existing exact wanderer/roster `RemoveTroop` preflight and finalizer remain in place as the first-line guard; unrelated `TroopRoster` operations are still untouched.
+- Updated the supported Distinguished Service description to the current Nexus 1.3.14 / 1.3.14-NoWarsails files instead of the stale v7.4.0 label used by older DSFix documentation.
+- Added release validation for the exact `FleeToOtherClanLord` boundary guard and cleanup ordering.
+
 ## 1.7.5
 
 - Fixed Distinguished Service promotions losing TOR races when a culture contains wanderer templates from a different race, including wraith/undead promotions becoming human and the associated malformed body/head combinations.
@@ -28,10 +37,10 @@
 
 ## 1.7.2
 
-- Fixed the reported `System.IndexOutOfRangeException` from `TroopRoster.AddToCountsAtIndex` / `TroopRoster.RemoveTroop` inside Distinguished Service's `PromotionManager.FleeToOtherClanLord` path after the ended map-event roster has changed.
-- Scoped the compatibility guard to the exact wanderer and exact `MapEventParty.Troops` roster captured by `FleeToOtherClanLord`; unrelated `TroopRoster.RemoveTroop` calls retain native behavior.
+- Added protection for the reported `System.IndexOutOfRangeException` from `TroopRoster.AddToCountsAtIndex` / `TroopRoster.RemoveTroop` inside Distinguished Service's `PromotionManager.FleeToOtherClanLord` path after the ended map-event roster has changed.
+- Scoped that first-line compatibility guard to the exact wanderer and exact `MapEventParty.Troops` roster captured by `FleeToOtherClanLord`; unrelated `TroopRoster.RemoveTroop` calls retain native behavior.
 - Added a preflight that skips an already-satisfied removal when that exact wanderer is absent, plus a narrow `IndexOutOfRangeException` fallback for the same exact target if native removal still resolves a stale/invalid roster index.
-- Rebuilt the repository from the Nexus v1.7.1 behavior so GitHub now contains the current TOR summoned-agent and promoted-name compatibility code instead of the obsolete 2025 source snapshot.
+- Rebuilt the repository from the Nexus v1.7.1 behavior so GitHub contains the current TOR summoned-agent and promoted-name compatibility code instead of the obsolete 2025 source snapshot.
 - Removed the v1.7.1 `ThreadLocal<Stack<object[]>>` implementation detail entirely; promotion naming now uses a thread-static linked context and therefore no longer needs the binary metadata rewrite that v1.7.1 required on Bannerlord 1.3.15.
 - Added reproducible GitHub Actions build/validation and automatic GitHub release packaging for Bannerlord 1.3.15.
 
