@@ -1,26 +1,27 @@
-## DSFix v1.7.5
+## DSFix v1.7.6
 
-Fixes TOR custom-race troops promoted through Distinguished Service becoming companions of the wrong race, including wraith/undead promotions turning human and the resulting malformed head/body combinations.
+Fixes the Distinguished Service `FleeToOtherClanLord` `System.IndexOutOfRangeException` still appearing in the campaign event feed with DSFix v1.7.5.
 
-### Root cause
+### What the new runtime evidence changed
 
-Distinguished Service does not create the companion from the promoted troop. `PromotionManager.PromoteUnit` first selects a wanderer template using culture, sex, and civilian-equipment criteria, then calls `HeroCreator.CreateSpecialHero(wanderer, ..., rand.Next(20, 50))`.
+The original report used a stack that reached Bannerlord's `TroopRoster.RemoveTroop -> AddToCountsAtIndex`, so v1.7.2 guarded that exact nested roster-removal operation.
 
-Bannerlord clones the selected wanderer's `Race`, `BodyPropertyRange`, and original-character link into the new hero. For wanderer templates, Bannerlord's hero-creation age model also ignores Distinguished Service's 20-49 age argument and derives age from the wanderer template itself. Distinguished Service later copies the source troop's culture, formation, equipment, level, and skills, but never repairs race/body identity.
+The new v1.7.5 runtime screenshot repeatedly shows:
 
-That makes the result effectively random in TOR cultures containing wanderers of multiple races.
+`System.IndexOutOfRangeException -> DistinguishedService.PromotionManager.FleeToOtherClanLord_Patch1 -> PromotionManager.MapEventEnded`
+
+without the previously assumed `TroopRoster.RemoveTroop` frames. That establishes that the current Distinguished Service 1.3.14 flee cleanup has another stale index failure path that the exact `RemoveTroop` hook cannot contain.
 
 ### Fix
 
-v1.7.5 scopes a compatibility context to the exact `PromoteUnit -> CreateSpecialHero -> CreateHero` call. Only when the selected wanderer race differs from the promoted troop race, DSFix:
+v1.7.6 keeps the existing exact wanderer/`MapEventParty.Troops` protection and adds a second, still narrowly scoped safety boundary:
 
-- applies the source troop's `Race` and `BodyPropertyRange` before hero initialization;
-- clamps Distinguished Service's requested age to the source body's valid age range and evaluates it through the active `HeroCreationModel`;
-- temporarily exposes the source troop as `OriginalCharacter` while Bannerlord derives culture and static body properties;
-- restores the original wanderer `OriginalCharacter` immediately after `CreateSpecialHero`, including exception paths, preserving Distinguished Service's wanderer occupation/template semantics.
+- only the exact `DistinguishedService.PromotionManager.FleeToOtherClanLord(MapEventParty, CharacterObject)` method is affected;
+- its Harmony finalizer restores DSFix's thread-local flee context before handling the exception;
+- only `IndexOutOfRangeException` escaping that exact cleanup method is contained;
+- every other exception type is propagated unchanged;
+- unrelated `TroopRoster` operations remain native.
 
-Corrected promoted identities are also save-persistent. DSFix tracks each corrected companion's current race and body-property-range ID, refreshes those values before save, and reapplies them on session launch after Bannerlord rebuilds the hero from its wanderer origin. This allows later intentional race/body changes to persist normally.
+This matches the actual live failure boundary while avoiding a global array/roster exception suppressor.
 
-Existing malformed companions created before v1.7.5 are not rewritten automatically because their original promoted troop cannot be recovered safely from the finished hero.
-
-The existing summoned-agent result fix, promoted-name compatibility, optional external-name-list handling, and exact-target lord-promotion roster guard remain unchanged.
+The TOR summoned-agent result fix, promoted race/body identity preservation, save/load persistence, culture-accurate naming, and optional external-name-list handling remain unchanged.

@@ -45,7 +45,7 @@ namespace DSFix
                     finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleeFinalizer)));
 
                 _patched = true;
-                DSLog.Write("Patched Distinguished Service lord-promotion flee handling so stale/depleted map-event rosters cannot crash TroopRoster.RemoveTroop.", true);
+                DSLog.Write("Patched Distinguished Service lord-promotion flee handling: exact-roster RemoveTroop protection plus an exact FleeToOtherClanLord IndexOutOfRangeException boundary guard.", true);
             }
         }
 
@@ -100,6 +100,13 @@ namespace DSFix
         {
             FleeContext context = _currentFlee;
             _currentFlee = context?.Previous;
+
+            if (__exception is IndexOutOfRangeException)
+            {
+                DSLog.Write("Suppressed IndexOutOfRangeException escaping the exact DistinguishedService.PromotionManager.FleeToOtherClanLord boundary. The v1.7.2 exact RemoveTroop guard did not contain this runtime path, so the failure originated from another stale index operation inside the same post-map-event flee cleanup.");
+                return null;
+            }
+
             return __exception;
         }
 
