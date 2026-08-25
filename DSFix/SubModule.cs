@@ -9,7 +9,7 @@ namespace DSFix
 {
     public sealed class SubModule : MBSubModuleBase
     {
-        internal const string HarmonyId = "xmarre.dsfix.bannerlord.1.3.15.tor.witm.1.16.distinguishedservice.7.5";
+        internal const string HarmonyId = "xmarre.dsfix.bannerlord.1.3.15.tor.witm.1.16.distinguishedservice.7.6";
         private Harmony _harmony;
         private AssemblyLoadEventHandler _assemblyLoadHandler;
 
