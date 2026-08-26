@@ -54,7 +54,7 @@ namespace DSFix
                     finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedFinalizer)));
 
                 _patched = true;
-                DSLog.Write("Patched Distinguished Service post-map-event roster handling: exact FleeToOtherClanLord protection plus exact MapEventEnded map-event-roster RemoveTroop protection.", true);
+                DSLog.Write("Patched Distinguished Service post-map-event roster handling: exact FleeToOtherClanLord protection plus exact MapEventEnded participant-roster RemoveTroop protection.", true);
             }
         }
 
@@ -173,7 +173,7 @@ namespace DSFix
             if (MatchesCurrentFleeTarget(__instance, __0))
                 DSLog.Write("Suppressed TroopRoster.RemoveTroop IndexOutOfRangeException for the exact wanderer/roster pair inside DistinguishedService.PromotionManager.FleeToOtherClanLord.");
             else
-                DSLog.Write("Suppressed TroopRoster.RemoveTroop IndexOutOfRangeException for an exact MapEventParty.Troops roster while DistinguishedService.PromotionManager.MapEventEnded was cleaning up the same ended map event.");
+                DSLog.Write("Suppressed TroopRoster.RemoveTroop IndexOutOfRangeException for an exact participant roster while DistinguishedService.PromotionManager.MapEventEnded was cleaning up the same ended map event.");
             return null;
         }
 
@@ -210,8 +210,9 @@ namespace DSFix
             if (mapEvent == null)
                 return rosters;
 
-            // Bannerlord 1.3.15 exposes MapEvent.Parties. Use it first because it gives the exact
-            // MapEventParty objects whose Troops rosters Distinguished Service cleans up.
+            // Capture exact roster objects owned by parties participating in this event. The live
+            // Distinguished Service build can remove from either the transient MapEventParty.Troops
+            // roster or the participant PartyBase.MemberRoster while MapEventEnded is running.
             AddRostersFromParties(ReflectionUtil.ReadMember(mapEvent, "Parties"), rosters);
 
             // Keep a signature-based fallback for builds where the Parties property shape differs.
@@ -234,7 +235,7 @@ namespace DSFix
             }
             catch (Exception ex)
             {
-                DSLog.Write("MapEvent roster capture fallback failed open: " + Unwrap(ex).Message);
+                DSLog.Write("MapEvent participant-roster capture fallback failed open: " + Unwrap(ex).Message);
             }
 
             return rosters;
@@ -245,27 +246,38 @@ namespace DSFix
             if (parties == null || rosters == null)
                 return;
 
-            foreach (object party in ReflectionUtil.ReadObjects(parties))
+            try
             {
-                if (party == null || !ReflectionUtil.TypeNameEquals(party.GetType(), MapEventPartyTypeName))
-                    continue;
-
-                object roster = ReflectionUtil.ReadMember(party, "Troops");
-                if (roster == null)
-                    continue;
-
-                bool alreadyAdded = false;
-                for (int i = 0; i < rosters.Count; i++)
+                foreach (object mapEventParty in ReflectionUtil.ReadObjects(parties))
                 {
-                    if (ReferenceEquals(roster, rosters[i]))
-                    {
-                        alreadyAdded = true;
-                        break;
-                    }
+                    if (mapEventParty == null || !ReflectionUtil.TypeNameEquals(mapEventParty.GetType(), MapEventPartyTypeName))
+                        continue;
+
+                    AddRosterReference(ReflectionUtil.ReadMember(mapEventParty, "Troops"), rosters);
+
+                    object partyBase = ReflectionUtil.ReadMember(mapEventParty, "Party");
+                    AddRosterReference(ReflectionUtil.ReadMember(partyBase, "MemberRoster"), rosters);
                 }
-                if (!alreadyAdded)
-                    rosters.Add(roster);
             }
+            catch (Exception ex)
+            {
+                // Capture is an optimization/scope-discovery step. Failing to enumerate one stale
+                // event collection must not become a new campaign exception; unmatched calls stay native.
+                DSLog.Write("MapEvent participant-roster enumeration failed open: " + Unwrap(ex).Message);
+            }
+        }
+
+        private static void AddRosterReference(object roster, List<object> rosters)
+        {
+            if (roster == null || rosters == null)
+                return;
+
+            for (int i = 0; i < rosters.Count; i++)
+            {
+                if (ReferenceEquals(roster, rosters[i]))
+                    return;
+            }
+            rosters.Add(roster);
         }
 
         private static bool? TryContainsTroop(object roster, object troop)
