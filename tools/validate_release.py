@@ -93,23 +93,39 @@ def main() -> None:
     if flee_finalizer_body.index("_currentFlee = context?.Previous;") > flee_finalizer_body.index("if (__exception is IndexOutOfRangeException)"):
         fail("FleeToOtherClanLord context must be restored before exception suppression")
 
-    map_event_scope = re.search(
-        r"private static void MapEventEndedPrefix\(object __0\)(.*?)private static bool RemoveTroopPrefix",
+    map_event_prefix = re.search(
+        r"private static void MapEventEndedPrefix\(object __0\)(.*?)private static Exception MapEventEndedFinalizer",
         roster_source,
         re.S,
     )
-    if not map_event_scope:
-        fail("could not locate MapEventEnded cleanup scope")
-    map_event_scope_body = map_event_scope.group(1)
+    if not map_event_prefix:
+        fail("could not locate MapEventEnded prefix")
+    map_event_prefix_body = map_event_prefix.group(1)
     for required in (
         "Previous = _currentMapEvent",
         "Rosters = CollectMapEventRosters(__0)",
         "_currentMapEvent = context;",
+    ):
+        if required not in map_event_prefix_body:
+            fail(f"MapEventEnded prefix missing: {required}")
+
+    map_event_finalizer = re.search(
+        r"private static Exception MapEventEndedFinalizer\(Exception __exception\)(.*?)private static bool RemoveTroopPrefix",
+        roster_source,
+        re.S,
+    )
+    if not map_event_finalizer:
+        fail("could not locate MapEventEnded finalizer")
+    map_event_finalizer_body = map_event_finalizer.group(1)
+    for required in (
+        "MapEventContext context = _currentMapEvent;",
         "_currentMapEvent = context?.Previous;",
         "return __exception;",
     ):
-        if required not in map_event_scope_body:
-            fail(f"MapEventEnded cleanup scope missing: {required}")
+        if required not in map_event_finalizer_body:
+            fail(f"MapEventEnded finalizer missing: {required}")
+    if map_event_finalizer_body.index("_currentMapEvent = context?.Previous;") > map_event_finalizer_body.index("return __exception;"):
+        fail("MapEventEnded context must be restored before the original exception is propagated")
 
     remove_finalizer = re.search(
         r"private static Exception RemoveTroopFinalizer\(Exception __exception, object __instance, object __0\)(.*?)private static bool MatchesProtectedCleanupTarget",
