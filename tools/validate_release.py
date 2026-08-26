@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.6"
+EXPECTED_VERSION = "1.7.7"
 
 
 def fail(message: str) -> None:
@@ -35,10 +35,18 @@ def main() -> None:
     source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix").glob("*.cs"))
     for required in (
         "FleeToOtherClanLord",
+        "MapEventEndedPrefix",
+        "MapEventEndedFinalizer",
         "RemoveTroopPrefix",
         "RemoveTroopFinalizer",
+        "MatchesProtectedCleanupTarget",
         "MatchesCurrentFleeTarget",
+        "MatchesCurrentMapEventRoster",
         'ReflectionUtil.ReadMember(__0, "Troops")',
+        'ReflectionUtil.ReadMember(mapEvent, "Parties")',
+        'ReflectionUtil.ReadMember(mapEventParty, "Party")',
+        'ReflectionUtil.ReadMember(partyBase, "MemberRoster")',
+        "PartiesOnSide",
         "ShowBattleResults",
         "ExpectedRewriteCount = 3",
         "GenerateHeroFirstName",
@@ -53,17 +61,26 @@ def main() -> None:
 
     roster_source = (ROOT / "DSFix" / "LordPromotionRosterPatch.cs").read_text(encoding="utf-8")
     for required in (
+        'private const string MapEventTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEvent";',
+        'private const string MapEventPartyTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEventParty";',
+        "FindMapEventEnded(managerType)",
+        "harmony.Patch(mapEventEnded",
         "private static Exception RemoveTroopFinalizer",
         "__exception is IndexOutOfRangeException",
-        "MatchesCurrentFleeTarget(__instance, __0)",
+        "MatchesProtectedCleanupTarget(__instance, __0)",
         "ReferenceEquals(troop, context.Wanderer)",
         "ReferenceEquals(roster, context.Roster)",
+        "ReferenceEquals(roster, context.Rosters[i])",
+        "ReflectionUtil.TypeNameEquals(mapEventParty.GetType(), MapEventPartyTypeName)",
+        'AddRosterReference(ReflectionUtil.ReadMember(mapEventParty, "Troops"), rosters);',
+        'AddRosterReference(ReflectionUtil.ReadMember(partyBase, "MemberRoster"), rosters);',
+        "MapEvent participant-roster enumeration failed open",
     ):
         if required not in roster_source:
-            fail(f"lord-promotion exact-target guard missing: {required}")
+            fail(f"post-map-event roster guard missing: {required}")
 
     flee_finalizer = re.search(
-        r"private static Exception FleeFinalizer\(Exception __exception\)(.*?)private static bool RemoveTroopPrefix",
+        r"private static Exception FleeFinalizer\(Exception __exception\)(.*?)private static void MapEventEndedPrefix",
         roster_source,
         re.S,
     )
@@ -80,6 +97,63 @@ def main() -> None:
             fail(f"FleeToOtherClanLord boundary guard missing: {required}")
     if flee_finalizer_body.index("_currentFlee = context?.Previous;") > flee_finalizer_body.index("if (__exception is IndexOutOfRangeException)"):
         fail("FleeToOtherClanLord context must be restored before exception suppression")
+
+    map_event_prefix = re.search(
+        r"private static void MapEventEndedPrefix\(object __0\)(.*?)private static Exception MapEventEndedFinalizer",
+        roster_source,
+        re.S,
+    )
+    if not map_event_prefix:
+        fail("could not locate MapEventEnded prefix")
+    map_event_prefix_body = map_event_prefix.group(1)
+    for required in (
+        "Previous = _currentMapEvent",
+        "Rosters = CollectMapEventRosters(__0)",
+        "_currentMapEvent = context;",
+    ):
+        if required not in map_event_prefix_body:
+            fail(f"MapEventEnded prefix missing: {required}")
+
+    map_event_finalizer = re.search(
+        r"private static Exception MapEventEndedFinalizer\(Exception __exception\)(.*?)private static bool RemoveTroopPrefix",
+        roster_source,
+        re.S,
+    )
+    if not map_event_finalizer:
+        fail("could not locate MapEventEnded finalizer")
+    map_event_finalizer_body = map_event_finalizer.group(1)
+    for required in (
+        "MapEventContext context = _currentMapEvent;",
+        "_currentMapEvent = context?.Previous;",
+        "return __exception;",
+    ):
+        if required not in map_event_finalizer_body:
+            fail(f"MapEventEnded finalizer missing: {required}")
+    if map_event_finalizer_body.index("_currentMapEvent = context?.Previous;") > map_event_finalizer_body.index("return __exception;"):
+        fail("MapEventEnded context must be restored before the original exception is propagated")
+
+    remove_finalizer = re.search(
+        r"private static Exception RemoveTroopFinalizer\(Exception __exception, object __instance, object __0\)(.*?)private static bool MatchesProtectedCleanupTarget",
+        roster_source,
+        re.S,
+    )
+    if not remove_finalizer:
+        fail("could not locate protected RemoveTroop finalizer")
+    remove_finalizer_body = remove_finalizer.group(1)
+    if "!MatchesProtectedCleanupTarget(__instance, __0)" not in remove_finalizer_body:
+        fail("RemoveTroop IndexOutOfRangeException suppression is not scoped to Distinguished Service post-map-event cleanup")
+    if "return null;" not in remove_finalizer_body or "return __exception;" not in remove_finalizer_body:
+        fail("RemoveTroop finalizer must suppress only matched failures and propagate everything else")
+
+    protected_matcher = re.search(
+        r"private static bool MatchesProtectedCleanupTarget\(object roster, object troop\)(.*?)private static bool MatchesCurrentFleeTarget",
+        roster_source,
+        re.S,
+    )
+    if not protected_matcher:
+        fail("could not locate protected cleanup matcher")
+    if "MatchesCurrentFleeTarget(roster, troop) || MatchesCurrentMapEventRoster(roster)" not in protected_matcher.group(1):
+        fail("protected cleanup matcher does not cover both exact flee and exact ended-map-event participant rosters")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",

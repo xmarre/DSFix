@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.7
+
+- Fixed the remaining live `System.IndexOutOfRangeException` path shown after v1.7.6: `TroopRoster.RemoveTroop_Patch1 -> DistinguishedService.PromotionManager.MapEventEnded`.
+- The new stack establishes a separate direct `RemoveTroop` call from `MapEventEnded`; it does not run inside `FleeToOtherClanLord`, so the v1.7.2 exact-flee roster context and the v1.7.6 flee method-boundary guard cannot match it.
+- Added an exact `PromotionManager.MapEventEnded(MapEvent)` scope that captures only rosters owned by parties participating in that same ended event: each `MapEventParty.Troops` roster and the corresponding participant `PartyBase.MemberRoster`. The current Nexus DLL is not available as source and the stack does not expose the `TroopRoster` instance, so covering both exact participant-owned roster candidates avoids guessing which one the live cleanup removes from.
+- Participant discovery uses `MapEvent.Parties`, with `PartiesOnSide` as a signature-based fallback. Roster matching is by reference identity, not troop/culture heuristics.
+- The existing global `TroopRoster.RemoveTroop` Harmony hook remains inert outside Distinguished Service cleanup. During the exact `MapEventEnded` scope it preflights only captured participant rosters, skips an already-absent troop, and contains only `IndexOutOfRangeException` from `RemoveTroop` on those exact roster instances.
+- The exact `FleeToOtherClanLord` protection remains unchanged and composes with the new map-event scope. Thread-local contexts are restored on all exits, including nested/re-entrant cleanup. Participant-roster enumeration also fails open so stale event enumeration cannot introduce a new crash.
+- Added release validation for the exact `MapEventEnded` signature, transient and live participant-roster capture, reference-identity matching, narrow `RemoveTroop` suppression, context lifetime, and exception propagation outside the protected cleanup scope.
+
 ## 1.7.6
 
 - Fixed the `System.IndexOutOfRangeException` still escaping from `DistinguishedService.PromotionManager.FleeToOtherClanLord` on the live Distinguished Service 1.3.14 path after v1.7.2-v1.7.5.
@@ -15,7 +25,7 @@
 - Root cause: `PromotionManager.PromoteUnit` selects a wanderer template by culture/sex and `HeroCreator.CreateSpecialHero` clones that template's `Race`, `BodyPropertyRange`, and wanderer age path. Distinguished Service later copies culture/equipment/skills, but never restores the promoted troop's race/body identity.
 - The compatibility hook now scopes itself to the exact `PromoteUnit -> CreateSpecialHero -> CreateHero` call. When the selected wanderer race differs from the source troop, the hero clone receives the source race/body range before hero initialization, and Bannerlord temporarily sees the source troop as `OriginalCharacter` while it derives culture/static body properties.
 - The temporary `OriginalCharacter` substitution is always restored to Distinguished Service's wanderer origin after `CreateSpecialHero`, including exception paths, so companion occupation/template behavior and save-load initialization remain Distinguished Service-compatible.
-- Fixed the related custom-race age mismatch. Distinguished Service's requested 20-49 age is clamped to the source troop's valid body-property age range and evaluated through the active `HeroCreationModel`, preventing exact-age TOR bodies such as wraith/skeleton/vampire from inheriting an unrelated wanderer's age.
+- Fixed the related custom-race age mismatch. Distinguished Service's requested 20-49 age is clamped to the source `BodyPropertyRange` age interval and evaluated through the active `HeroCreationModel`, preventing exact-age TOR bodies such as wraith/skeleton/vampire from inheriting an unrelated wanderer's age.
 - Added campaign persistence for corrected promotions. DSFix saves each tracked companion's current race and `BodyPropertyRange` ID, reapplies them on session launch after Bannerlord reconstructs the hero from its wanderer origin, and refreshes the stored values immediately before save so intentional later race/body changes remain persistent.
 - Existing malformed companions created before v1.7.5 are not guessed or rewritten automatically because the original promoted troop identity is not recoverable safely from the finished hero.
 - Added release validation for the one-shot promotion scope, exact template match, temporary-origin restoration, source-compatible age path, and save/load race/body persistence.
