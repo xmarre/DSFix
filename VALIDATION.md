@@ -62,14 +62,16 @@ The replacement preserves the original stack signature and original arguments. I
 
 This preserves any legitimate removal if runtime state differs from the expected already-absent case.
 
-## Structural fail-closed behavior
+## Structural and patch-state fail-closed behavior
 
 The transpilers enforce the validated target shape:
 
 - `MapEventEnded` must contain exactly **2** matching `RemoveTroop` calls;
 - `FleeToOtherClanLord` must contain exactly **3** matching `RemoveTroop` calls.
 
-A different rewrite count throws `InvalidOperationException` during patch application. DSFix therefore refuses a partial rewrite when a future Distinguished Service DLL changes the target methods.
+A different rewrite count throws `InvalidOperationException` during patch application. Patch installation also has an all-or-nothing invariant: both target transpilers are installed inside one guarded feature scope. If either Harmony patch operation fails, DSFix explicitly unpatches its transpiler from both target methods using the current Harmony owner ID and rethrows. `_patched` is set only after both patch operations succeed.
+
+This prevents stale partial state where one DS cleanup method is corrected and the other still contains the invalid removals.
 
 ## Removed containment machinery
 
@@ -114,6 +116,7 @@ GitHub Actions restores and builds both DSFix assemblies as `net472` against Ban
 - replacement with a same-signature static helper;
 - positive live troop-count precondition;
 - native `RemoveTroop` fallback when the troop is present;
+- all-or-nothing patch installation and rollback of both transpilers on failure;
 - fail-closed structural mismatch handling;
 - absence of the previous global roster hook, cleanup contexts, and exception suppression;
 - all existing promoted-race, save/load, naming, summoned-agent, and package invariants.
