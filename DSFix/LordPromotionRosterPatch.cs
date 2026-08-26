@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using HarmonyLib;
+using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Roster;
+using TaleWorlds.Core;
 
 namespace DSFix
 {
@@ -13,14 +17,12 @@ namespace DSFix
         private const string CharacterObjectTypeName = "TaleWorlds.CampaignSystem.CharacterObject";
         private const string MapEventTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEvent";
         private const string MapEventPartyTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEventParty";
+        private const int ExpectedMapEventEndedRewriteCount = 2;
+        private const int ExpectedFleeRewriteCount = 3;
         private static readonly object PatchLock = new object();
+        private static readonly MethodInfo SafeRemoveTroopMethod = AccessTools.Method(typeof(LordPromotionRosterPatch), nameof(RemoveTroopIfPresent));
+        private static MethodInfo _removeTroopMethod;
         private static bool _patched;
-
-        [ThreadStatic]
-        private static FleeContext _currentFlee;
-
-        [ThreadStatic]
-        private static MapEventContext _currentMapEvent;
 
         internal static void TryPatch(Harmony harmony)
         {
@@ -39,22 +41,29 @@ namespace DSFix
 
                 MethodInfo flee = FindFleeToOtherClanLord(managerType);
                 MethodInfo mapEventEnded = FindMapEventEnded(managerType);
-                MethodInfo removeTroop = FindRemoveTroop(troopRosterType);
+                _removeTroopMethod = FindRemoveTroop(troopRosterType);
+                if (SafeRemoveTroopMethod == null)
+                    throw new MissingMethodException(nameof(RemoveTroopIfPresent));
 
-                // RemoveTroop is globally visible, but the hook is behaviorally inert unless the
-                // call is proven to belong to Distinguished Service's exact post-map-event cleanup.
-                harmony.Patch(removeTroop,
-                    prefix: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(RemoveTroopPrefix)),
-                    finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(RemoveTroopFinalizer)));
-                harmony.Patch(flee,
-                    prefix: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleePrefix)),
-                    finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleeFinalizer)));
-                harmony.Patch(mapEventEnded,
-                    prefix: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedPrefix)),
-                    finalizer: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedFinalizer)));
+                try
+                {
+                    harmony.Patch(flee,
+                        transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleeToOtherClanLordTranspiler)));
+                    harmony.Patch(mapEventEnded,
+                        transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedTranspiler)));
+                }
+                catch
+                {
+                    // Patch application is atomic at the DSFix feature level. If either validated
+                    // target fails to rewrite, remove any transpiler already installed by this
+                    // Harmony owner so the game never runs with only part of the five-site fix.
+                    harmony.Unpatch(flee, HarmonyPatchType.Transpiler, harmony.Id);
+                    harmony.Unpatch(mapEventEnded, HarmonyPatchType.Transpiler, harmony.Id);
+                    throw;
+                }
 
                 _patched = true;
-                DSLog.Write("Patched Distinguished Service post-map-event roster handling: exact FleeToOtherClanLord protection plus exact MapEventEnded participant-roster RemoveTroop protection.", true);
+                DSLog.Write("Patched Distinguished Service's five known invalid post-map-event RemoveTroop call sites: 2 in MapEventEnded and 3 in FleeToOtherClanLord. No global TroopRoster hook or exception suppression is installed.", true);
             }
         }
 
@@ -101,229 +110,65 @@ namespace DSFix
                     ParameterInfo[] p = m.GetParameters();
                     return p.Length == 4
                         && ReflectionUtil.TypeNameEquals(p[0].ParameterType, CharacterObjectTypeName)
-                        && p[1].ParameterType == typeof(int);
+                        && p[1].ParameterType == typeof(int)
+                        && p[2].ParameterType == typeof(UniqueTroopDescriptor)
+                        && p[3].ParameterType == typeof(int);
                 }).ToArray();
             if (matches.Length != 1)
                 throw new MissingMethodException(matches.Length > 1
-                    ? "Multiple four-argument TroopRoster.RemoveTroop(CharacterObject, ...) methods were found."
+                    ? "Multiple four-argument TroopRoster.RemoveTroop(CharacterObject, int, UniqueTroopDescriptor, int) methods were found."
                     : "TroopRoster.RemoveTroop(CharacterObject, int, UniqueTroopDescriptor, int)");
             return matches[0];
         }
 
-        private static void FleePrefix(object __0, object __1)
+        private static IEnumerable<CodeInstruction> MapEventEndedTranspiler(IEnumerable<CodeInstruction> instructions)
         {
-            FleeContext context = new FleeContext
-            {
-                Previous = _currentFlee,
-                Wanderer = __1,
-                Roster = ReflectionUtil.ReadMember(__0, "Troops")
-            };
-            _currentFlee = context;
+            return RewriteRemoveTroopCalls(instructions, ExpectedMapEventEndedRewriteCount, "PromotionManager.MapEventEnded");
         }
 
-        private static Exception FleeFinalizer(Exception __exception)
+        private static IEnumerable<CodeInstruction> FleeToOtherClanLordTranspiler(IEnumerable<CodeInstruction> instructions)
         {
-            FleeContext context = _currentFlee;
-            _currentFlee = context?.Previous;
+            return RewriteRemoveTroopCalls(instructions, ExpectedFleeRewriteCount, "PromotionManager.FleeToOtherClanLord");
+        }
 
-            if (__exception is IndexOutOfRangeException)
+        private static IEnumerable<CodeInstruction> RewriteRemoveTroopCalls(IEnumerable<CodeInstruction> instructions, int expectedCount, string targetName)
+        {
+            List<CodeInstruction> rewritten = instructions.ToList();
+            int rewriteCount = 0;
+
+            for (int i = 0; i < rewritten.Count; i++)
             {
-                DSLog.Write("Suppressed IndexOutOfRangeException escaping the exact DistinguishedService.PromotionManager.FleeToOtherClanLord boundary.");
-                return null;
+                CodeInstruction instruction = rewritten[i];
+                if (!instruction.Calls(_removeTroopMethod))
+                    continue;
+
+                instruction.opcode = OpCodes.Call;
+                instruction.operand = SafeRemoveTroopMethod;
+                rewriteCount++;
             }
 
-            return __exception;
-        }
-
-        private static void MapEventEndedPrefix(object __0)
-        {
-            MapEventContext context = new MapEventContext
+            if (rewriteCount != expectedCount)
             {
-                Previous = _currentMapEvent,
-                Rosters = CollectMapEventRosters(__0)
-            };
-            _currentMapEvent = context;
-        }
-
-        private static Exception MapEventEndedFinalizer(Exception __exception)
-        {
-            MapEventContext context = _currentMapEvent;
-            _currentMapEvent = context?.Previous;
-            return __exception;
-        }
-
-        private static bool RemoveTroopPrefix(object __instance, object __0, int __1)
-        {
-            if (__1 <= 0 || !MatchesProtectedCleanupTarget(__instance, __0))
-                return true;
-
-            bool? contains = TryContainsTroop(__instance, __0);
-            if (contains != false)
-                return true;
-
-            DSLog.Write("Skipped Distinguished Service's stale post-map-event roster removal because the exact troop was already absent from the protected TroopRoster.");
-            return false;
-        }
-
-        private static Exception RemoveTroopFinalizer(Exception __exception, object __instance, object __0)
-        {
-            if (!(__exception is IndexOutOfRangeException) || !MatchesProtectedCleanupTarget(__instance, __0))
-                return __exception;
-
-            if (MatchesCurrentFleeTarget(__instance, __0))
-                DSLog.Write("Suppressed TroopRoster.RemoveTroop IndexOutOfRangeException for the exact wanderer/roster pair inside DistinguishedService.PromotionManager.FleeToOtherClanLord.");
-            else
-                DSLog.Write("Suppressed TroopRoster.RemoveTroop IndexOutOfRangeException for an exact participant roster while DistinguishedService.PromotionManager.MapEventEnded was cleaning up the same ended map event.");
-            return null;
-        }
-
-        private static bool MatchesProtectedCleanupTarget(object roster, object troop)
-        {
-            return MatchesCurrentFleeTarget(roster, troop) || MatchesCurrentMapEventRoster(roster);
-        }
-
-        private static bool MatchesCurrentFleeTarget(object roster, object troop)
-        {
-            FleeContext context = _currentFlee;
-            if (context == null || roster == null || troop == null || !ReferenceEquals(troop, context.Wanderer))
-                return false;
-            return context.Roster == null || ReferenceEquals(roster, context.Roster);
-        }
-
-        private static bool MatchesCurrentMapEventRoster(object roster)
-        {
-            MapEventContext context = _currentMapEvent;
-            if (context == null || roster == null || context.Rosters == null)
-                return false;
-
-            for (int i = 0; i < context.Rosters.Count; i++)
-            {
-                if (ReferenceEquals(roster, context.Rosters[i]))
-                    return true;
-            }
-            return false;
-        }
-
-        private static List<object> CollectMapEventRosters(object mapEvent)
-        {
-            List<object> rosters = new List<object>();
-            if (mapEvent == null)
-                return rosters;
-
-            // Capture exact roster objects owned by parties participating in this event. The live
-            // Distinguished Service build can remove from either the transient MapEventParty.Troops
-            // roster or the participant PartyBase.MemberRoster while MapEventEnded is running.
-            AddRostersFromParties(ReflectionUtil.ReadMember(mapEvent, "Parties"), rosters);
-
-            // Keep a signature-based fallback for builds where the Parties property shape differs.
-            try
-            {
-                MethodInfo partiesOnSide = mapEvent.GetType().GetMethods(ReflectionUtil.AllInstance)
-                    .FirstOrDefault(m => m.Name == "PartiesOnSide"
-                        && m.GetParameters().Length == 1
-                        && m.GetParameters()[0].ParameterType.IsEnum);
-                if (partiesOnSide != null)
-                {
-                    Type sideType = partiesOnSide.GetParameters()[0].ParameterType;
-                    foreach (object side in Enum.GetValues(sideType))
-                    {
-                        object parties = null;
-                        try { parties = partiesOnSide.Invoke(mapEvent, new[] { side }); } catch { }
-                        AddRostersFromParties(parties, rosters);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                DSLog.Write("MapEvent participant-roster capture fallback failed open: " + Unwrap(ex).Message);
+                throw new InvalidOperationException(
+                    $"{targetName} contained {rewriteCount} matching TroopRoster.RemoveTroop call(s); expected exactly {expectedCount}. " +
+                    "Refusing to apply a partial or structurally mismatched Distinguished Service compatibility rewrite.");
             }
 
-            return rosters;
+            DSLog.Write($"Rewrote {rewriteCount} exact TroopRoster.RemoveTroop call site(s) in {targetName}.", true);
+            return rewritten;
         }
 
-        private static void AddRostersFromParties(object parties, List<object> rosters)
+        private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)
         {
-            if (parties == null || rosters == null)
+            // Only change the proven failing case. Null arguments, non-positive removal counts, and
+            // all other inputs keep Bannerlord's native RemoveTroop behavior and failure semantics.
+            if (roster != null && troop != null && numberToRemove > 0 && roster.GetTroopCount(troop) <= 0)
+            {
+                DSLog.Write("Skipped Distinguished Service's invalid post-map-event RemoveTroop call because the wanderer is already absent from the target roster.");
                 return;
-
-            try
-            {
-                foreach (object mapEventParty in ReflectionUtil.ReadObjects(parties))
-                {
-                    if (mapEventParty == null || !ReflectionUtil.TypeNameEquals(mapEventParty.GetType(), MapEventPartyTypeName))
-                        continue;
-
-                    AddRosterReference(ReflectionUtil.ReadMember(mapEventParty, "Troops"), rosters);
-
-                    object partyBase = ReflectionUtil.ReadMember(mapEventParty, "Party");
-                    AddRosterReference(ReflectionUtil.ReadMember(partyBase, "MemberRoster"), rosters);
-                }
             }
-            catch (Exception ex)
-            {
-                // Capture is an optimization/scope-discovery step. Failing to enumerate one stale
-                // event collection must not become a new campaign exception; unmatched calls stay native.
-                DSLog.Write("MapEvent participant-roster enumeration failed open: " + Unwrap(ex).Message);
-            }
-        }
 
-        private static void AddRosterReference(object roster, List<object> rosters)
-        {
-            if (roster == null || rosters == null)
-                return;
-
-            for (int i = 0; i < rosters.Count; i++)
-            {
-                if (ReferenceEquals(roster, rosters[i]))
-                    return;
-            }
-            rosters.Add(roster);
-        }
-
-        private static bool? TryContainsTroop(object roster, object troop)
-        {
-            try
-            {
-                MethodInfo contains = roster.GetType().GetMethods(ReflectionUtil.AllInstance)
-                    .FirstOrDefault(m => m.Name == "Contains"
-                        && m.ReturnType == typeof(bool)
-                        && m.GetParameters().Length == 1
-                        && m.GetParameters()[0].ParameterType.IsInstanceOfType(troop));
-                if (contains != null)
-                    return (bool)contains.Invoke(roster, new[] { troop });
-
-                MethodInfo getCount = roster.GetType().GetMethods(ReflectionUtil.AllInstance)
-                    .FirstOrDefault(m => m.Name == "GetTroopCount"
-                        && m.ReturnType == typeof(int)
-                        && m.GetParameters().Length == 1
-                        && m.GetParameters()[0].ParameterType.IsInstanceOfType(troop));
-                if (getCount != null)
-                    return (int)getCount.Invoke(roster, new[] { troop }) > 0;
-            }
-            catch (Exception ex)
-            {
-                DSLog.Write("Post-map-event roster preflight failed open: " + Unwrap(ex).Message);
-            }
-            return null;
-        }
-
-        private static Exception Unwrap(Exception ex)
-        {
-            TargetInvocationException tie = ex as TargetInvocationException;
-            return tie?.InnerException ?? ex;
-        }
-
-        private sealed class FleeContext
-        {
-            internal FleeContext Previous;
-            internal object Wanderer;
-            internal object Roster;
-        }
-
-        private sealed class MapEventContext
-        {
-            internal MapEventContext Previous;
-            internal List<object> Rosters;
+            roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);
         }
     }
 }

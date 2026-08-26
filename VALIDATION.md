@@ -1,78 +1,100 @@
-# DSFix v1.7.7 validation
+# DSFix v1.7.8 validation
 
-## Reported live failure
+## Exact supported Distinguished Service binary
 
-### Symptom
+The supplied target `DistinguishedService.dll` has SHA-256:
 
-With v1.7.6 installed, the campaign event feed still reports:
+`58cfbba78db17c3f26787cf3cb97e3ae0da4c68f9604517ce7f3347275bce184`
+
+This binary is the basis for the v1.7.8 roster fix.
+
+## Symptom
+
+Post-battle campaign cleanup can report:
 
 `System.IndexOutOfRangeException: Index was outside the bounds of the array.`
 
-The new stack is:
+Observed stacks include both:
 
-`TaleWorlds.CampaignSystem.Roster.TroopRoster.RemoveTroop_Patch1(TroopRoster this, CharacterObject troop, Int32 numberToRemove, UniqueTroopDescriptor troopSeed, Int32 xo)`
+`TroopRoster.RemoveTroop(...) -> DistinguishedService.PromotionManager.MapEventEnded(...)`
 
-`DistinguishedService.PromotionManager.MapEventEnded(MapEvent me)`
+and:
 
-### Trigger
+`TroopRoster.RemoveTroop(...) -> DistinguishedService.PromotionManager.FleeToOtherClanLord(...) -> PromotionManager.MapEventEnded(...)`
 
-The failure occurs during Distinguished Service's post-map-event AI promotion/cleanup callback. The exact `RemoveTroop` call is directly under `MapEventEnded`, outside `FleeToOtherClanLord`.
+## Trigger
 
-### Root cause
+Distinguished Service records wanderers associated with a party before a map event, determines which of those wanderers are missing afterward, and performs post-event cleanup for those missing heroes.
 
-v1.7.2 scoped `TroopRoster.RemoveTroop` protection to an active `FleeToOtherClanLord(MapEventParty, CharacterObject)` context. v1.7.6 additionally contained `IndexOutOfRangeException` at that exact flee method boundary.
+## Root cause
 
-The v1.7.6 stack proves a second call path exists: `MapEventEnded` itself performs a `RemoveTroop` on participant roster state. No `_currentFlee` context exists for that direct call, so the existing narrow `RemoveTroopFinalizer` intentionally propagates the exception.
+Inspection of the exact target binary establishes the violated invariant:
 
-Public Distinguished Service source confirms that `MapEventEnded(MapEvent)` iterates `MapEventParty` objects from `me.PartiesOnSide(me.WinningSide)` and reads each party's transient `p.Troops` roster. The current Nexus 1.3.14 DLL contains additional cleanup not present in that older public source. The live stack does not expose the `TroopRoster __instance`, so it does not prove whether the added removal targets the transient `MapEventParty.Troops` roster or the participating `PartyBase.MemberRoster`.
+> Distinguished Service calls `TroopRoster.RemoveTroop` for a wanderer that its own before/after comparison has already established is absent from the target roster.
 
-The violated compatibility invariant is:
+The target binary contains exactly five relevant four-argument calls to:
 
-> A direct roster removal performed by Distinguished Service while cleaning an ended `MapEvent` must not resolve a stale internal index, and compatibility protection must remain limited to roster objects owned by parties in that exact event.
+`TroopRoster.RemoveTroop(CharacterObject, int, UniqueTroopDescriptor, int)`
 
-## v1.7.7 fix
+inside the cleanup path:
 
-`LordPromotionRosterPatch` now establishes two independent nested cleanup contexts:
+- **2** calls in `PromotionManager.MapEventEnded(MapEvent)`;
+- **3** calls in `PromotionManager.FleeToOtherClanLord(MapEventParty, CharacterObject)`.
 
-1. `FleeToOtherClanLord(MapEventParty, CharacterObject)` keeps the existing exact wanderer/roster context.
-2. `MapEventEnded(MapEvent)` captures the participant-owned roster instances belonging to that exact event.
+When the wanderer has no positive live count, Bannerlord's `TroopRoster.RemoveTroop` can resolve an invalid internal index and fail in `AddToCountsAtIndex`.
 
-The `MapEventEnded` prefix collects participating `MapEventParty` objects by:
+The target Distinguished Service code already works from copied/snapshot wanderer lists in this logic. Mutation of the same forward-iterated list is therefore not the failure mechanism for this binary.
 
-- reading `MapEvent.Parties` first;
-- invoking `PartiesOnSide(...)` for available enum sides as a signature-based fallback;
-- accepting only objects whose runtime type is exactly `TaleWorlds.CampaignSystem.MapEvents.MapEventParty`;
-- recording each exact `MapEventParty.Troops` roster;
-- recording the corresponding underlying `PartyBase.MemberRoster`;
-- deduplicating roster objects with `ReferenceEquals`.
+## v1.7.8 fix
 
-Capturing both participant-owned roster locations is deliberate. The current Nexus DLL is unavailable as source and the runtime stack omits `TroopRoster __instance`; selecting only one would encode an unsupported assumption about the new Distinguished Service cleanup implementation.
+`LordPromotionRosterPatch` now patches only the two Distinguished Service methods that contain the known-invalid calls.
 
-The global `TroopRoster.RemoveTroop` Harmony hook remains inert unless either exact cleanup context matches:
+Two Harmony transpilers replace the exact four-argument `RemoveTroop` call instruction with:
 
-- the existing flee path requires the exact wanderer and exact captured flee roster;
-- the direct map-event path requires the `TroopRoster` instance to be one of the exact participant roster references captured from the active `MapEvent`.
+`DSFix.LordPromotionRosterPatch.RemoveTroopIfPresent(...)`
 
-For a matched cleanup call:
+The replacement preserves the original stack signature and original arguments. It changes only the proven failing input:
 
-- if the requested troop is already absent, the removal is skipped before Bannerlord resolves an invalid internal index;
-- if native `RemoveTroop` still throws `IndexOutOfRangeException`, the finalizer contains that exception for the matched roster only;
-- every other exception type propagates unchanged;
-- every unrelated `TroopRoster.RemoveTroop` call remains native.
+1. when the roster and troop are non-null and `numberToRemove > 0`, read `TroopRoster.GetTroopCount(troop)`;
+2. return without mutation when that positive removal request targets an already-absent troop;
+3. call the original Bannerlord `TroopRoster.RemoveTroop` with the original `troop`, `numberToRemove`, `UniqueTroopDescriptor`, and `xp` for every other input.
 
-`MapEventEndedFinalizer` restores the previous thread-local map-event context on all exits. Nested `FleeToOtherClanLord` calls keep their separate linked context and restore independently. Participant enumeration is wrapped so stale event enumeration fails open and cannot become a new exception source.
+Null arguments, non-positive removal counts, present troops, and any native errors outside the already-absent positive-removal case therefore retain Bannerlord's original behavior and failure semantics.
+
+## Structural and patch-state fail-closed behavior
+
+The transpilers enforce the validated target shape:
+
+- `MapEventEnded` must contain exactly **2** matching `RemoveTroop` calls;
+- `FleeToOtherClanLord` must contain exactly **3** matching `RemoveTroop` calls.
+
+A different rewrite count throws `InvalidOperationException` during patch application. Patch installation also has an all-or-nothing invariant: both target transpilers are installed inside one guarded feature scope. If either Harmony patch operation fails, DSFix explicitly unpatches its transpiler from both target methods using the current Harmony owner ID and rethrows. `_patched` is set only after both patch operations succeed.
+
+This prevents stale partial state where one DS cleanup method is corrected and the other still contains the invalid removals.
+
+## Removed containment machinery
+
+The v1.7.8 implementation does not install a Harmony patch on `TroopRoster.RemoveTroop` itself. The previous compatibility machinery is removed from this code path:
+
+- no global roster prefix;
+- no global roster finalizer;
+- no event participant-roster collection;
+- no thread-static map-event/flee scope;
+- no `IndexOutOfRangeException` suppression;
+- no broad fallback around unrelated roster operations.
+
+Only the five validated Distinguished Service call sites are changed.
 
 ## Alternative hypotheses checked
 
-- **The v1.7.6 flee boundary is failing to run:** the latest stack has no `FleeToOtherClanLord` frame. This is a separate direct `MapEventEnded -> RemoveTroop` path.
-- **The direct removal definitely targets `MapEventParty.Troops`:** not established by the stack. The current live DLL source is unavailable, so v1.7.7 protects both exact participant-owned candidate rosters instead of guessing.
-- **The race/body promotion patch causes the failure:** the stack is in post-map-event roster mutation and does not enter `PromoteUnit -> HeroCreator` identity initialization.
-- **The TOR summoned-agent cast fix causes the failure:** that path concerns `DSBattleLogic.ShowBattleResults` and `InvalidCastException`, not `TroopRoster.RemoveTroop`.
-- **A global `RemoveTroop` exception suppressor is required:** rejected. The live evidence provides an exact owner callback and an exact set of participant-owned roster objects, allowing reference-scoped protection.
+- **Forward iteration changes indexes after each removal:** ruled out for the supplied binary's relevant wanderer selection logic because it iterates copied/snapshot lists.
+- **TOR race/body promotion handling causes the roster crash:** unrelated. The failure occurs in post-map-event cleanup after the roster state has already changed.
+- **TOR summoned-agent result conversion causes the roster crash:** unrelated. That compatibility path rewrites `IAgentOriginBase.BattleCombatant -> PartyBase` conversions in `ShowBattleResults`.
+- **Bannerlord requires a global `RemoveTroop` workaround:** unsupported. The exact five Distinguished Service callers violate the precondition, so the fix belongs at those callers.
 
-## Preserved invariants
+## Preserved behavior
 
-The existing compatibility behavior remains unchanged outside the failing path:
+The change does not alter:
 
 - TOR summoned-agent result ownership conversion;
 - culture-accurate promoted names;
@@ -80,25 +102,24 @@ The existing compatibility behavior remains unchanged outside the failing path:
 - promoted TOR race/body preservation;
 - body-compatible age generation;
 - save/load persistence for corrected race/body identity;
-- exact `FleeToOtherClanLord` cleanup protection.
+- any `TroopRoster.RemoveTroop` call outside the five validated Distinguished Service cleanup sites.
 
 ## CI validation
 
 GitHub Actions restores and builds both DSFix assemblies as `net472` against Bannerlord 1.3.15 reference assemblies. `tools/validate_release.py` verifies:
 
 - release/module version consistency;
-- exact `MapEventEnded(MapEvent)` target discovery;
-- exact `FleeToOtherClanLord(MapEventParty, CharacterObject)` target discovery;
-- participant discovery from `Parties` plus `PartiesOnSide` fallback;
-- exact `MapEventParty` type filtering;
-- capture of both transient `Troops` and underlying `MemberRoster` objects;
-- roster reference-identity matching;
-- `RemoveTroop` suppression gated by the combined protected-cleanup matcher;
-- propagation of unmatched exceptions and unrelated roster calls;
-- linked cleanup-context restoration;
-- fail-open participant enumeration;
+- exact `MapEventEnded(MapEvent)` and `FleeToOtherClanLord(MapEventParty, CharacterObject)` target discovery;
+- exact four-argument `TroopRoster.RemoveTroop` overload discovery including `UniqueTroopDescriptor`;
+- expected rewrite counts of 2 and 3;
+- replacement with a same-signature static helper;
+- compatibility suppression limited to the non-null, positive-count, already-absent troop case;
+- native `RemoveTroop` fallback for null arguments, non-positive counts, and all other non-targeted inputs;
+- all-or-nothing patch installation and rollback of both transpilers on failure;
+- fail-closed structural mismatch handling;
+- absence of the previous global roster hook, cleanup contexts, and exception suppression;
 - all existing promoted-race, save/load, naming, summoned-agent, and package invariants.
 
-## Runtime boundary
+## Remaining runtime verification
 
-The latest screenshot establishes the missing direct `MapEventEnded -> RemoveTroop` path and explains why v1.7.6 could not match it. The exact current cleanup statement cannot be identified without the current Distinguished Service DLL/source. CI can prove target discovery, compilation, and patch scoping. A real Bannerlord 1.3.15 + TOR WiTM 1.16 + Distinguished Service 1.3.14 battle remains the final runtime verification that the repeated red `RemoveTroop_Patch1 -> MapEventEnded` error is gone.
+Compilation and structural validation can prove the rewrite shape. A Bannerlord 1.3.15 + TOR WiTM 1.16 + the exact supplied Distinguished Service binary run remains the final verification that the campaign feed no longer receives the previously observed `RemoveTroop`/`IndexOutOfRangeException` errors.

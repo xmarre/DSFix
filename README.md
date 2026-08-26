@@ -1,4 +1,4 @@
-# DSFix v1.7.7
+# DSFix v1.7.8
 
 Compatibility module for **Mount & Blade II: Bannerlord 1.3.15**, **The Old Realms: War in the Mountains 1.16**, and the **Distinguished Service 1.3.x fork** from Nexus mod 6007 (current 1.3.14 / 1.3.14-NoWarsails files).
 
@@ -11,7 +11,7 @@ Compatibility module for **Mount & Blade II: Bannerlord 1.3.15**, **The Old Real
 - TOR promoted-troop names: promoted heroes use the source troop culture's gender-correct name pool and the localized source troop name as their title, e.g. `Aelar the Eonir Mounted Ranger`. The name is enforced before Distinguished Service creates the immediate skill-focus inquiry.
 - Bannerlord 1.3.15 `NameGenerator` compatibility: `GenerateHeroFirstName(Hero)` is an instance method in the target game build. DSFix binds the Harmony hook to the actual instance method.
 - Distinguished Service variants that do not expose `PromotionManager.get_using_extern_namelist()`: the external-name-list bypass remains optional. Its absence does not abort the TOR promoted-name patch set.
-- Distinguished Service post-map-event roster cleanup: the live 1.3.14 fork has two observed stale-index paths. DSFix protects the exact `FleeToOtherClanLord(MapEventParty, CharacterObject)` cleanup and direct `TroopRoster.RemoveTroop` calls made while the exact `MapEventEnded(MapEvent)` callback is processing the same event. The map-event scope records only rosters owned by participating parties: each `MapEventParty.Troops` roster and corresponding `PartyBase.MemberRoster`. Matching is by object reference. Other roster operations and other exception types retain native behavior.
+- Distinguished Service post-map-event roster cleanup: the exact supported `DistinguishedService.dll` identifies wanderers that were present before battle and are already absent afterward, then attempts to remove those same absent wanderers again. The target binary contains **two** such `TroopRoster.RemoveTroop` call sites in `PromotionManager.MapEventEnded` and **three** in `PromotionManager.FleeToOtherClanLord`. DSFix rewrites exactly those five calls to require a positive live troop count before invoking Bannerlord's native removal. The rewrite count is enforced at patch time, so a changed Distinguished Service binary fails closed instead of receiving a partial compatibility patch. No global `TroopRoster` hook or exception suppression is installed.
 
 ## Installation
 
@@ -25,7 +25,7 @@ Log file:
 
 `Documents/Mount and Blade II Bannerlord/Configs/DSFix.log`
 
-Successful startup should report the battle-result patch, the promoted-troop identity patch, the promoted-troop naming patches, and the post-map-event roster patch. If a protected stale removal is encountered, the log states whether it was handled through the exact `FleeToOtherClanLord` target or an exact participant roster captured from `MapEventEnded`.
+Successful startup should report the battle-result patch, the promoted-troop identity patch, the promoted-troop naming patches, and exact roster rewrites of **2** `RemoveTroop` calls in `MapEventEnded` plus **3** in `FleeToOtherClanLord`. When one of those calls targets an already-absent wanderer, DSFix logs that the invalid removal was skipped.
 
 ## Save compatibility
 
