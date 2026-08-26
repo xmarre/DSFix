@@ -29,9 +29,10 @@ v1.7.8 removes the v1.7.7 global `TroopRoster.RemoveTroop` hook, map-event roste
 
 Two Harmony transpilers now target only the exact Distinguished Service methods above. They replace each matching four-argument `TroopRoster.RemoveTroop(CharacterObject, int, UniqueTroopDescriptor, int)` call with a DSFix helper that:
 
-1. checks the target roster's current `GetTroopCount` for the wanderer;
-2. returns without mutation when the count is already zero/absent;
-3. invokes Bannerlord's original `RemoveTroop` with the original arguments when a positive live count still exists.
+1. applies the compatibility check only for a non-null roster, non-null troop, and positive removal count;
+2. checks the target roster's current `GetTroopCount` for that wanderer;
+3. returns without mutation only when that positive removal request targets an already-absent wanderer;
+4. invokes Bannerlord's original `RemoveTroop` with every original argument for all other inputs, preserving native behavior and failure semantics outside the proven failing case.
 
 The transpilers require exactly **2** rewrites in `MapEventEnded` and exactly **3** in `FleeToOtherClanLord`. Any structural mismatch throws during patch application. Patch application is atomic at the feature level: if either target cannot be rewritten, DSFix removes any transpiler it already installed on the other target and rethrows, so the game never runs with only part of the five-site fix.
 
