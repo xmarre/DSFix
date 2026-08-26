@@ -1,4 +1,4 @@
-# DSFix v1.7.6
+# DSFix v1.7.7
 
 Compatibility module for **Mount & Blade II: Bannerlord 1.3.15**, **The Old Realms: War in the Mountains 1.16**, and the **Distinguished Service 1.3.x fork** from Nexus mod 6007 (current 1.3.14 / 1.3.14-NoWarsails files).
 
@@ -11,7 +11,7 @@ Compatibility module for **Mount & Blade II: Bannerlord 1.3.15**, **The Old Real
 - TOR promoted-troop names: promoted heroes use the source troop culture's gender-correct name pool and the localized source troop name as their title, e.g. `Aelar the Eonir Mounted Ranger`. The name is enforced before Distinguished Service creates the immediate skill-focus inquiry.
 - Bannerlord 1.3.15 `NameGenerator` compatibility: `GenerateHeroFirstName(Hero)` is an instance method in the target game build. DSFix binds the Harmony hook to the actual instance method.
 - Distinguished Service variants that do not expose `PromotionManager.get_using_extern_namelist()`: the external-name-list bypass remains optional. Its absence does not abort the TOR promoted-name patch set.
-- Distinguished Service lord-promotion/flee handling: the live 1.3.14 fork can throw `IndexOutOfRangeException` from inside `PromotionManager.FleeToOtherClanLord` after a map event. DSFix keeps the exact wanderer/roster `RemoveTroop` protection and also contains `IndexOutOfRangeException` at the exact `FleeToOtherClanLord` method boundary. This covers stale index operations inside that cleanup method that do not pass through the previously guarded `RemoveTroop` call. Other exception types and unrelated roster operations retain native behavior.
+- Distinguished Service post-map-event roster cleanup: the live 1.3.14 fork has two observed stale-index paths. DSFix protects the exact `FleeToOtherClanLord(MapEventParty, CharacterObject)` cleanup and the direct `TroopRoster.RemoveTroop` calls made while the exact `MapEventEnded(MapEvent)` callback is processing the same event. The `MapEventEnded` scope captures only that event's `MapEventParty.Troops` roster instances and applies the existing preflight/finalizer only to those exact objects. Other roster operations and other exception types retain native behavior.
 
 ## Installation
 
@@ -25,7 +25,7 @@ Log file:
 
 `Documents/Mount and Blade II Bannerlord/Configs/DSFix.log`
 
-Successful startup should report the battle-result patch, the promoted-troop identity patch, the promoted-troop naming patches, and the lord-promotion flee patch. If the v1.7.6 boundary guard is exercised, the log records that an `IndexOutOfRangeException` escaped the inner exact-roster guard and was contained at the exact `FleeToOtherClanLord` boundary.
+Successful startup should report the battle-result patch, the promoted-troop identity patch, the promoted-troop naming patches, and the post-map-event roster patch. If a protected stale removal is encountered, the log states whether it was handled through the exact `FleeToOtherClanLord` target or an exact `MapEventParty.Troops` roster captured from `MapEventEnded`.
 
 ## Save compatibility
 
