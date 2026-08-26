@@ -53,14 +53,13 @@ Two Harmony transpilers replace the exact four-argument `RemoveTroop` call instr
 
 `DSFix.LordPromotionRosterPatch.RemoveTroopIfPresent(...)`
 
-The replacement preserves the original stack signature and original arguments. It performs one additional invariant check:
+The replacement preserves the original stack signature and original arguments. It changes only the proven failing input:
 
-1. reject null/zero-count removal requests;
-2. read `TroopRoster.GetTroopCount(troop)`;
-3. return without mutation when the live count is zero or negative;
-4. call the original Bannerlord `TroopRoster.RemoveTroop` with the original `troop`, `numberToRemove`, `UniqueTroopDescriptor`, and `xp` when the troop still has a positive live count.
+1. when the roster and troop are non-null and `numberToRemove > 0`, read `TroopRoster.GetTroopCount(troop)`;
+2. return without mutation when that positive removal request targets an already-absent troop;
+3. call the original Bannerlord `TroopRoster.RemoveTroop` with the original `troop`, `numberToRemove`, `UniqueTroopDescriptor`, and `xp` for every other input.
 
-This preserves any legitimate removal if runtime state differs from the expected already-absent case.
+Null arguments, non-positive removal counts, present troops, and any native errors outside the already-absent positive-removal case therefore retain Bannerlord's original behavior and failure semantics.
 
 ## Structural and patch-state fail-closed behavior
 
@@ -114,8 +113,8 @@ GitHub Actions restores and builds both DSFix assemblies as `net472` against Ban
 - exact four-argument `TroopRoster.RemoveTroop` overload discovery including `UniqueTroopDescriptor`;
 - expected rewrite counts of 2 and 3;
 - replacement with a same-signature static helper;
-- positive live troop-count precondition;
-- native `RemoveTroop` fallback when the troop is present;
+- compatibility suppression limited to the non-null, positive-count, already-absent troop case;
+- native `RemoveTroop` fallback for null arguments, non-positive counts, and all other non-targeted inputs;
 - all-or-nothing patch installation and rollback of both transpilers on failure;
 - fail-closed structural mismatch handling;
 - absence of the previous global roster hook, cleanup contexts, and exception suppression;
