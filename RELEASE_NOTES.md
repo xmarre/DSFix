@@ -33,7 +33,7 @@ Two Harmony transpilers now target only the exact Distinguished Service methods 
 2. returns without mutation when the count is already zero/absent;
 3. invokes Bannerlord's original `RemoveTroop` with the original arguments when a positive live count still exists.
 
-The transpilers require exactly **2** rewrites in `MapEventEnded` and exactly **3** in `FleeToOtherClanLord`. Any structural mismatch throws during patch application, preventing a future Distinguished Service binary from receiving a partial or incorrectly targeted rewrite.
+The transpilers require exactly **2** rewrites in `MapEventEnded` and exactly **3** in `FleeToOtherClanLord`. Any structural mismatch throws during patch application. Patch application is atomic at the feature level: if either target cannot be rewritten, DSFix removes any transpiler it already installed on the other target and rethrows, so the game never runs with only part of the five-site fix.
 
 All other `TroopRoster.RemoveTroop` calls remain completely native. No exception type is suppressed.
 
