@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.7
+
+- Fixed the remaining live `System.IndexOutOfRangeException` path shown after v1.7.6: `TroopRoster.RemoveTroop_Patch1 -> DistinguishedService.PromotionManager.MapEventEnded`.
+- The new stack establishes a separate direct `RemoveTroop` call from `MapEventEnded`; it does not run inside `FleeToOtherClanLord`, so the v1.7.2 exact-flee roster context and the v1.7.6 flee method-boundary guard cannot match it.
+- Added an exact `PromotionManager.MapEventEnded(MapEvent)` scope that captures only the `MapEventParty.Troops` rosters belonging to that same ended map event, using `MapEvent.Parties` with `PartiesOnSide` as a signature-based fallback.
+- The existing global `TroopRoster.RemoveTroop` Harmony hook remains inert outside Distinguished Service cleanup. During the exact `MapEventEnded` scope it preflights only captured map-event rosters, skips an already-absent troop, and contains only `IndexOutOfRangeException` from `RemoveTroop` on those exact roster instances.
+- The exact `FleeToOtherClanLord` protection remains unchanged and composes with the new map-event scope. Thread-local contexts are restored on all exits, including nested/re-entrant cleanup.
+- Added release validation for the exact `MapEventEnded` signature, map-event roster capture, reference-identity matching, narrow `RemoveTroop` suppression, and exception propagation outside the protected cleanup scope.
+
 ## 1.7.6
 
 - Fixed the `System.IndexOutOfRangeException` still escaping from `DistinguishedService.PromotionManager.FleeToOtherClanLord` on the live Distinguished Service 1.3.14 path after v1.7.2-v1.7.5.
