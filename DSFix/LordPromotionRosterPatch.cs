@@ -160,10 +160,9 @@ namespace DSFix
 
         private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)
         {
-            if (roster == null || troop == null || numberToRemove <= 0)
-                return;
-
-            if (roster.GetTroopCount(troop) <= 0)
+            // Only change the proven failing case. Null arguments, non-positive removal counts, and
+            // all other inputs keep Bannerlord's native RemoveTroop behavior and failure semantics.
+            if (roster != null && troop != null && numberToRemove > 0 && roster.GetTroopCount(troop) <= 0)
             {
                 DSLog.Write("Skipped Distinguished Service's invalid post-map-event RemoveTroop call because the wanderer is already absent from the target roster.");
                 return;
