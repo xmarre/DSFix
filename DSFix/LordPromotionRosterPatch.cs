@@ -151,7 +151,7 @@ namespace DSFix
             if (roster == null || troop == null || numberToRemove <= 0)
                 return;
 
-            if (!roster.Contains(troop))
+            if (roster.GetTroopCount(troop) <= 0)
             {
                 DSLog.Write("Skipped Distinguished Service's invalid post-map-event RemoveTroop call because the wanderer is already absent from the target roster.");
                 return;
