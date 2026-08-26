@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.8
+
+- Replaced the v1.7.7 event-scoped `TroopRoster` containment with an exact root-cause compatibility rewrite against the supplied Distinguished Service 1.3.14 binary (`SHA-256 58cfbba78db17c3f26787cf3cb97e3ae0da4c68f9604517ce7f3347275bce184`).
+- Confirmed the supported binary builds a list of wanderers that were present before battle and are already absent afterward, then attempts to remove those same missing wanderers again from party rosters.
+- Confirmed the binary contains exactly five affected four-argument `TroopRoster.RemoveTroop` call sites: 2 in `PromotionManager.MapEventEnded` and 3 in `PromotionManager.FleeToOtherClanLord`.
+- Confirmed Distinguished Service already works from copied/snapshot wanderer lists in this path; forward iteration over a collection being mutated is not the cause of this binary's failure.
+- Replaced exactly those five calls with a helper that checks `TroopRoster.GetTroopCount` and skips the invalid removal when the target wanderer has no positive live count. When the troop is still present, Bannerlord's native `RemoveTroop` receives the original arguments unchanged.
+- Removed the global `TroopRoster.RemoveTroop` Harmony hook, participant-roster capture, thread-local event/flee contexts, and `IndexOutOfRangeException` suppression introduced by the earlier containment approach.
+- Added strict structural guards requiring exactly 2 rewrites in `MapEventEnded` and exactly 3 in `FleeToOtherClanLord`; patch application fails closed if a future Distinguished Service binary no longer matches the validated layout.
+- Updated release validation to reject reintroduction of broad roster hooks or exception suppression and to require the exact five-site rewrite plus native-present-troop fallback.
+
 ## 1.7.7
 
 - Fixed the remaining live `System.IndexOutOfRangeException` path shown after v1.7.6: `TroopRoster.RemoveTroop_Patch1 -> DistinguishedService.PromotionManager.MapEventEnded`.
@@ -40,7 +51,7 @@
 ## 1.7.3
 
 - Fixed the startup warning/error `System.MissingMethodException: get_using_extern_namelist()` from `DSFix.LoreNamePatch.FindExternalNamesGetter` on Distinguished Service builds that do not expose that property getter.
-- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-troop naming patch set.
+- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-name patch set.
 - The core `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` hooks now continue to patch when `get_using_extern_namelist()` is absent.
 - Preserved the separate direct pre-inquiry naming enforcement in `DSFix.InBattleNaming`, so source-culture promoted names do not depend on the external-name-list getter existing.
 - Added release validation that rejects reintroducing a mandatory external-name-list getter dependency.
