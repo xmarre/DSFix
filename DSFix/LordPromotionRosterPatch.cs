@@ -45,10 +45,22 @@ namespace DSFix
                 if (SafeRemoveTroopMethod == null)
                     throw new MissingMethodException(nameof(RemoveTroopIfPresent));
 
-                harmony.Patch(flee,
-                    transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleeToOtherClanLordTranspiler)));
-                harmony.Patch(mapEventEnded,
-                    transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedTranspiler)));
+                try
+                {
+                    harmony.Patch(flee,
+                        transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(FleeToOtherClanLordTranspiler)));
+                    harmony.Patch(mapEventEnded,
+                        transpiler: new HarmonyMethod(typeof(LordPromotionRosterPatch), nameof(MapEventEndedTranspiler)));
+                }
+                catch
+                {
+                    // Patch application is atomic at the DSFix feature level. If either validated
+                    // target fails to rewrite, remove any transpiler already installed by this
+                    // Harmony owner so the game never runs with only part of the five-site fix.
+                    harmony.Unpatch(flee, HarmonyPatchType.Transpiler, harmony.Id);
+                    harmony.Unpatch(mapEventEnded, HarmonyPatchType.Transpiler, harmony.Id);
+                    throw;
+                }
 
                 _patched = true;
                 DSLog.Write("Patched Distinguished Service's five known invalid post-map-event RemoveTroop call sites: 2 in MapEventEnded and 3 in FleeToOtherClanLord. No global TroopRoster hook or exception suppression is installed.", true);
