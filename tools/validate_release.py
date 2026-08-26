@@ -73,7 +73,7 @@ def main() -> None:
         "harmony.Unpatch(flee, HarmonyPatchType.Transpiler, harmony.Id);",
         "harmony.Unpatch(mapEventEnded, HarmonyPatchType.Transpiler, harmony.Id);",
         "private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)",
-        "if (roster.GetTroopCount(troop) <= 0)",
+        "if (roster != null && troop != null && numberToRemove > 0 && roster.GetTroopCount(troop) <= 0)",
         "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);",
     ):
         if required not in roster_source:
@@ -142,10 +142,12 @@ def main() -> None:
     if not safe_remove:
         fail("could not locate safe RemoveTroop replacement")
     safe_remove_body = safe_remove.group(1)
-    if "roster.GetTroopCount(troop) <= 0" not in safe_remove_body:
-        fail("safe replacement does not require a positive live troop count")
+    if "roster != null && troop != null && numberToRemove > 0 && roster.GetTroopCount(troop) <= 0" not in safe_remove_body:
+        fail("safe replacement is not limited to the proven non-null positive-count absent-troop case")
+    if "if (roster == null || troop == null || numberToRemove <= 0)" in safe_remove_body:
+        fail("safe replacement suppresses native null/non-positive input behavior")
     if "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);" not in safe_remove_body:
-        fail("safe replacement does not preserve native removal when the troop is present")
+        fail("safe replacement does not preserve native RemoveTroop for every non-targeted input")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
