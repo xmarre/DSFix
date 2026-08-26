@@ -70,6 +70,8 @@ def main() -> None:
         "instruction.operand = SafeRemoveTroopMethod;",
         "if (rewriteCount != expectedCount)",
         "Refusing to apply a partial or structurally mismatched Distinguished Service compatibility rewrite.",
+        "harmony.Unpatch(flee, HarmonyPatchType.Transpiler, harmony.Id);",
+        "harmony.Unpatch(mapEventEnded, HarmonyPatchType.Transpiler, harmony.Id);",
         "private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)",
         "if (roster.GetTroopCount(troop) <= 0)",
         "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);",
@@ -94,6 +96,30 @@ def main() -> None:
     ):
         if forbidden in roster_source:
             fail(f"broad/exception-based post-map-event workaround reintroduced: {forbidden}")
+
+    patch_scope = re.search(
+        r"try\s*\{(.*?)\}\s*catch\s*\{(.*?)\}\s*\n\s*_patched = true;",
+        roster_source,
+        re.S,
+    )
+    if not patch_scope:
+        fail("could not locate atomic Distinguished Service patch application scope")
+    patch_try, patch_catch = patch_scope.groups()
+    for required in (
+        "harmony.Patch(flee",
+        "nameof(FleeToOtherClanLordTranspiler)",
+        "harmony.Patch(mapEventEnded",
+        "nameof(MapEventEndedTranspiler)",
+    ):
+        if required not in patch_try:
+            fail(f"atomic patch try block missing: {required}")
+    for required in (
+        "harmony.Unpatch(flee, HarmonyPatchType.Transpiler, harmony.Id);",
+        "harmony.Unpatch(mapEventEnded, HarmonyPatchType.Transpiler, harmony.Id);",
+        "throw;",
+    ):
+        if required not in patch_catch:
+            fail(f"atomic patch rollback missing: {required}")
 
     rewrite_helper = re.search(
         r"private static IEnumerable<CodeInstruction> RewriteRemoveTroopCalls\((.*?)private static void RemoveTroopIfPresent",
