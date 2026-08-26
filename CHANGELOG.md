@@ -9,7 +9,8 @@
 - Replaced exactly those five calls with a helper that checks `TroopRoster.GetTroopCount` and skips the invalid removal when the target wanderer has no positive live count. When the troop is still present, Bannerlord's native `RemoveTroop` receives the original arguments unchanged.
 - Removed the global `TroopRoster.RemoveTroop` Harmony hook, participant-roster capture, thread-local event/flee contexts, and `IndexOutOfRangeException` suppression introduced by the earlier containment approach.
 - Added strict structural guards requiring exactly 2 rewrites in `MapEventEnded` and exactly 3 in `FleeToOtherClanLord`; patch application fails closed if a future Distinguished Service binary no longer matches the validated layout.
-- Updated release validation to reject reintroduction of broad roster hooks or exception suppression and to require the exact five-site rewrite plus native-present-troop fallback.
+- Made the two-method patch application atomic: if either target fails to patch, DSFix removes its transpiler from both target methods before propagating the failure, preventing a partially installed five-site fix.
+- Updated release validation to reject reintroduction of broad roster hooks or exception suppression and to require the exact five-site rewrite, atomic rollback, and native-present-troop fallback.
 
 ## 1.7.7
 
@@ -51,7 +52,7 @@
 ## 1.7.3
 
 - Fixed the startup warning/error `System.MissingMethodException: get_using_extern_namelist()` from `DSFix.LoreNamePatch.FindExternalNamesGetter` on Distinguished Service builds that do not expose that property getter.
-- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-name patch set.
+- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-troop naming patch set.
 - The core `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` hooks now continue to patch when `get_using_extern_namelist()` is absent.
 - Preserved the separate direct pre-inquiry naming enforcement in `DSFix.InBattleNaming`, so source-culture promoted names do not depend on the external-name-list getter existing.
 - Added release validation that rejects reintroducing a mandatory external-name-list getter dependency.
