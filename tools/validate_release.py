@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.7"
+EXPECTED_VERSION = "1.7.8"
 
 
 def fail(message: str) -> None:
@@ -35,18 +35,11 @@ def main() -> None:
     source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "DSFix").glob("*.cs"))
     for required in (
         "FleeToOtherClanLord",
-        "MapEventEndedPrefix",
-        "MapEventEndedFinalizer",
-        "RemoveTroopPrefix",
-        "RemoveTroopFinalizer",
-        "MatchesProtectedCleanupTarget",
-        "MatchesCurrentFleeTarget",
-        "MatchesCurrentMapEventRoster",
-        'ReflectionUtil.ReadMember(__0, "Troops")',
-        'ReflectionUtil.ReadMember(mapEvent, "Parties")',
-        'ReflectionUtil.ReadMember(mapEventParty, "Party")',
-        'ReflectionUtil.ReadMember(partyBase, "MemberRoster")',
-        "PartiesOnSide",
+        "MapEventEndedTranspiler",
+        "FleeToOtherClanLordTranspiler",
+        "ExpectedMapEventEndedRewriteCount = 2",
+        "ExpectedFleeRewriteCount = 3",
+        "RemoveTroopIfPresent",
         "ShowBattleResults",
         "ExpectedRewriteCount = 3",
         "GenerateHeroFirstName",
@@ -64,96 +57,69 @@ def main() -> None:
         'private const string MapEventTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEvent";',
         'private const string MapEventPartyTypeName = "TaleWorlds.CampaignSystem.MapEvents.MapEventParty";',
         "FindMapEventEnded(managerType)",
+        "FindFleeToOtherClanLord(managerType)",
+        "FindRemoveTroop(troopRosterType)",
+        "harmony.Patch(flee",
         "harmony.Patch(mapEventEnded",
-        "private static Exception RemoveTroopFinalizer",
-        "__exception is IndexOutOfRangeException",
-        "MatchesProtectedCleanupTarget(__instance, __0)",
-        "ReferenceEquals(troop, context.Wanderer)",
-        "ReferenceEquals(roster, context.Roster)",
-        "ReferenceEquals(roster, context.Rosters[i])",
-        "ReflectionUtil.TypeNameEquals(mapEventParty.GetType(), MapEventPartyTypeName)",
-        'AddRosterReference(ReflectionUtil.ReadMember(mapEventParty, "Troops"), rosters);',
-        'AddRosterReference(ReflectionUtil.ReadMember(partyBase, "MemberRoster"), rosters);',
-        "MapEvent participant-roster enumeration failed open",
+        "transpiler: new HarmonyMethod",
+        "ExpectedMapEventEndedRewriteCount = 2",
+        "ExpectedFleeRewriteCount = 3",
+        "RewriteRemoveTroopCalls",
+        "instruction.Calls(_removeTroopMethod)",
+        "instruction.opcode = OpCodes.Call;",
+        "instruction.operand = SafeRemoveTroopMethod;",
+        "if (rewriteCount != expectedCount)",
+        "Refusing to apply a partial or structurally mismatched Distinguished Service compatibility rewrite.",
+        "private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)",
+        "if (!roster.Contains(troop))",
+        "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);",
     ):
         if required not in roster_source:
-            fail(f"post-map-event roster guard missing: {required}")
+            fail(f"exact Distinguished Service RemoveTroop rewrite missing: {required}")
 
-    flee_finalizer = re.search(
-        r"private static Exception FleeFinalizer\(Exception __exception\)(.*?)private static void MapEventEndedPrefix",
-        roster_source,
-        re.S,
-    )
-    if not flee_finalizer:
-        fail("could not locate FleeToOtherClanLord finalizer")
-    flee_finalizer_body = flee_finalizer.group(1)
-    for required in (
-        "_currentFlee = context?.Previous;",
-        "if (__exception is IndexOutOfRangeException)",
-        "return null;",
-        "return __exception;",
+    # The root-cause fix must not regress to a global TroopRoster patch, event-wide context,
+    # or exception suppression. Only the five call sites in the two DS methods are rewritten.
+    for forbidden in (
+        "harmony.Patch(removeTroop",
+        "RemoveTroopPrefix",
+        "RemoveTroopFinalizer",
+        "FleeFinalizer",
+        "MapEventEndedPrefix",
+        "MapEventEndedFinalizer",
+        "MatchesProtectedCleanupTarget",
+        "MatchesCurrentMapEventRoster",
+        "CollectMapEventRosters",
+        "[ThreadStatic]",
+        "IndexOutOfRangeException",
     ):
-        if required not in flee_finalizer_body:
-            fail(f"FleeToOtherClanLord boundary guard missing: {required}")
-    if flee_finalizer_body.index("_currentFlee = context?.Previous;") > flee_finalizer_body.index("if (__exception is IndexOutOfRangeException)"):
-        fail("FleeToOtherClanLord context must be restored before exception suppression")
+        if forbidden in roster_source:
+            fail(f"broad/exception-based post-map-event workaround reintroduced: {forbidden}")
 
-    map_event_prefix = re.search(
-        r"private static void MapEventEndedPrefix\(object __0\)(.*?)private static Exception MapEventEndedFinalizer",
+    rewrite_helper = re.search(
+        r"private static IEnumerable<CodeInstruction> RewriteRemoveTroopCalls\((.*?)private static void RemoveTroopIfPresent",
         roster_source,
         re.S,
     )
-    if not map_event_prefix:
-        fail("could not locate MapEventEnded prefix")
-    map_event_prefix_body = map_event_prefix.group(1)
-    for required in (
-        "Previous = _currentMapEvent",
-        "Rosters = CollectMapEventRosters(__0)",
-        "_currentMapEvent = context;",
-    ):
-        if required not in map_event_prefix_body:
-            fail(f"MapEventEnded prefix missing: {required}")
+    if not rewrite_helper:
+        fail("could not locate exact RemoveTroop rewrite helper")
+    rewrite_body = rewrite_helper.group(1)
+    if "rewriteCount++" not in rewrite_body or "rewriteCount != expectedCount" not in rewrite_body:
+        fail("RemoveTroop transpiler does not enforce the exact target call count")
+    if "InvalidOperationException" not in rewrite_body:
+        fail("RemoveTroop transpiler must fail closed on a target binary shape mismatch")
 
-    map_event_finalizer = re.search(
-        r"private static Exception MapEventEndedFinalizer\(Exception __exception\)(.*?)private static bool RemoveTroopPrefix",
+    safe_remove = re.search(
+        r"private static void RemoveTroopIfPresent\((.*?)\n        }\n    }\n}",
         roster_source,
         re.S,
     )
-    if not map_event_finalizer:
-        fail("could not locate MapEventEnded finalizer")
-    map_event_finalizer_body = map_event_finalizer.group(1)
-    for required in (
-        "MapEventContext context = _currentMapEvent;",
-        "_currentMapEvent = context?.Previous;",
-        "return __exception;",
-    ):
-        if required not in map_event_finalizer_body:
-            fail(f"MapEventEnded finalizer missing: {required}")
-    if map_event_finalizer_body.index("_currentMapEvent = context?.Previous;") > map_event_finalizer_body.index("return __exception;"):
-        fail("MapEventEnded context must be restored before the original exception is propagated")
-
-    remove_finalizer = re.search(
-        r"private static Exception RemoveTroopFinalizer\(Exception __exception, object __instance, object __0\)(.*?)private static bool MatchesProtectedCleanupTarget",
-        roster_source,
-        re.S,
-    )
-    if not remove_finalizer:
-        fail("could not locate protected RemoveTroop finalizer")
-    remove_finalizer_body = remove_finalizer.group(1)
-    if "!MatchesProtectedCleanupTarget(__instance, __0)" not in remove_finalizer_body:
-        fail("RemoveTroop IndexOutOfRangeException suppression is not scoped to Distinguished Service post-map-event cleanup")
-    if "return null;" not in remove_finalizer_body or "return __exception;" not in remove_finalizer_body:
-        fail("RemoveTroop finalizer must suppress only matched failures and propagate everything else")
-
-    protected_matcher = re.search(
-        r"private static bool MatchesProtectedCleanupTarget\(object roster, object troop\)(.*?)private static bool MatchesCurrentFleeTarget",
-        roster_source,
-        re.S,
-    )
-    if not protected_matcher:
-        fail("could not locate protected cleanup matcher")
-    if "MatchesCurrentFleeTarget(roster, troop) || MatchesCurrentMapEventRoster(roster)" not in protected_matcher.group(1):
-        fail("protected cleanup matcher does not cover both exact flee and exact ended-map-event participant rosters")
+    if not safe_remove:
+        fail("could not locate safe RemoveTroop replacement")
+    safe_remove_body = safe_remove.group(1)
+    if "!roster.Contains(troop)" not in safe_remove_body:
+        fail("safe replacement does not verify that the troop still exists")
+    if "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);" not in safe_remove_body:
+        fail("safe replacement does not preserve native removal when the troop is present")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
