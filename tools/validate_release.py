@@ -44,6 +44,8 @@ def main() -> None:
         "MatchesCurrentMapEventRoster",
         'ReflectionUtil.ReadMember(__0, "Troops")',
         'ReflectionUtil.ReadMember(mapEvent, "Parties")',
+        'ReflectionUtil.ReadMember(mapEventParty, "Party")',
+        'ReflectionUtil.ReadMember(partyBase, "MemberRoster")',
         "PartiesOnSide",
         "ShowBattleResults",
         "ExpectedRewriteCount = 3",
@@ -69,7 +71,10 @@ def main() -> None:
         "ReferenceEquals(troop, context.Wanderer)",
         "ReferenceEquals(roster, context.Roster)",
         "ReferenceEquals(roster, context.Rosters[i])",
-        "ReflectionUtil.TypeNameEquals(party.GetType(), MapEventPartyTypeName)",
+        "ReflectionUtil.TypeNameEquals(mapEventParty.GetType(), MapEventPartyTypeName)",
+        'AddRosterReference(ReflectionUtil.ReadMember(mapEventParty, "Troops"), rosters);',
+        'AddRosterReference(ReflectionUtil.ReadMember(partyBase, "MemberRoster"), rosters);',
+        "MapEvent participant-roster enumeration failed open",
     ):
         if required not in roster_source:
             fail(f"post-map-event roster guard missing: {required}")
@@ -148,7 +153,7 @@ def main() -> None:
     if not protected_matcher:
         fail("could not locate protected cleanup matcher")
     if "MatchesCurrentFleeTarget(roster, troop) || MatchesCurrentMapEventRoster(roster)" not in protected_matcher.group(1):
-        fail("protected cleanup matcher does not cover both exact flee and exact ended-map-event rosters")
+        fail("protected cleanup matcher does not cover both exact flee and exact ended-map-event participant rosters")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
