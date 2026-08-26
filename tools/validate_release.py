@@ -71,7 +71,7 @@ def main() -> None:
         "if (rewriteCount != expectedCount)",
         "Refusing to apply a partial or structurally mismatched Distinguished Service compatibility rewrite.",
         "private static void RemoveTroopIfPresent(TroopRoster roster, CharacterObject troop, int numberToRemove, UniqueTroopDescriptor troopSeed, int xp)",
-        "if (!roster.Contains(troop))",
+        "if (roster.GetTroopCount(troop) <= 0)",
         "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);",
     ):
         if required not in roster_source:
@@ -116,8 +116,8 @@ def main() -> None:
     if not safe_remove:
         fail("could not locate safe RemoveTroop replacement")
     safe_remove_body = safe_remove.group(1)
-    if "!roster.Contains(troop)" not in safe_remove_body:
-        fail("safe replacement does not verify that the troop still exists")
+    if "roster.GetTroopCount(troop) <= 0" not in safe_remove_body:
+        fail("safe replacement does not require a positive live troop count")
     if "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);" not in safe_remove_body:
         fail("safe replacement does not preserve native removal when the troop is present")
 
