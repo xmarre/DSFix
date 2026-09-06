@@ -1,41 +1,41 @@
-## DSFix v1.7.8
+## DSFix v1.7.9
 
-Replaces the previous event-scoped `TroopRoster` containment with an exact root-cause rewrite for the supported Distinguished Service 1.3.14 binary.
+Fixes Distinguished Service AI-promoted companions becoming permanent tavern residents after their party is defeated and later destroyed/disbanded.
 
 ### Exact target binary
 
-The supplied `DistinguishedService.dll` has SHA-256:
+The supported `DistinguishedService.dll` has SHA-256:
 
 `58cfbba78db17c3f26787cf3cb97e3ae0da4c68f9604517ce7f3347275bce184`
 
-Inspection of that exact binary establishes the failure mechanism.
-
 ### Root cause
 
-Distinguished Service snapshots wanderers before the map event and compares them with the post-event roster. The resulting missing-wanderer list contains heroes that are already absent from the defeated party roster. Its cleanup then calls `TroopRoster.RemoveTroop` for those same missing wanderers.
+The exact Distinguished Service 1.3.14 binary creates AI promotions as **wanderer companions** and adds them to the promoting lord's clan and party.
 
-The supported binary contains five such removal sites:
+Its defeat cleanup snapshots wanderer companions at map-event start and, at `MapEventEnded`, processes only those that are **already absent** from the defeated party roster. A promoted companion that is still present at that instant is therefore outside that cleanup. If Bannerlord destroys/disbands the party afterward, the companion can become unassigned and be relocated to a settlement.
 
-- **2** in `PromotionManager.MapEventEnded(MapEvent)`;
-- **3** in `PromotionManager.FleeToOtherClanLord(MapEventParty, CharacterObject)`.
-
-This violates the roster invariant before Bannerlord enters `TroopRoster.RemoveTroop`: the requested troop has no positive live count in the target roster. Bannerlord can then resolve an invalid internal roster index and throw `IndexOutOfRangeException`.
-
-The code already works from copied/snapshot wanderer lists, so forward iteration over a mutating list is not the cause for this binary.
+Bannerlord 1.3.15 does not naturally recover that state: wanderers are excluded from normal autonomous settlement movement, and normal AI lord-party commander selection requires `Occupation.Lord`. The result can be a permanent tavern resident that still belongs to an AI clan.
 
 ### Fix
 
-v1.7.8 removes the v1.7.7 global `TroopRoster.RemoveTroop` hook, map-event roster capture, linked thread-local cleanup contexts, and `IndexOutOfRangeException` suppression.
+v1.7.9 adds exact lifecycle tracking and recovery:
 
-Two Harmony transpilers now target only the exact Distinguished Service methods above. They replace each matching four-argument `TroopRoster.RemoveTroop(CharacterObject, int, UniqueTroopDescriptor, int)` call with a DSFix helper that:
+- DSFix transpiles only `DistinguishedService.PromotionManager.PromoteToParty(CharacterObject, MobileParty)`.
+- The supported method must contain exactly **one** `AddHeroToPartyAction.Apply(Hero, MobileParty, bool)` call. A different shape fails closed.
+- That call is replaced by a same-signature helper that executes Bannerlord's native `AddHeroToPartyAction.Apply` first and records the AI promotion only after the native party handoff succeeds.
+- No global `AddHeroToPartyAction` hook is installed.
+- Exact tracked AI promotions are persisted in the campaign save.
+- When a tracked hero's party is destroyed, DSFix tries to transfer that companion to another active, non-disbanding, non-battle lord party of the hero's **current** companion clan.
+- If no safe destination exists at destruction time, native Bannerlord recovery is allowed to continue. The hero remains tracked and is reattached once they become a free, unassigned settlement resident and a valid clan party becomes available.
+- Prisoners, governors, player-clan companions, transitional fugitive/released/traveling heroes, and heroes that no longer use `Occupation.Wanderer` are left alone.
+- Recovery never restores a saved historical clan. It always follows the current `Hero.CompanionOf`, so legitimate ownership changes are respected.
 
-1. applies the compatibility check only for a non-null roster, non-null troop, and positive removal count;
-2. checks the target roster's current `GetTroopCount` for that wanderer;
-3. returns without mutation only when that positive removal request targets an already-absent wanderer;
-4. invokes Bannerlord's original `RemoveTroop` with every original argument for all other inputs, preserving native behavior and failure semantics outside the proven failing case.
+### Existing saves
 
-The transpilers require exactly **2** rewrites in `MapEventEnded` and exactly **3** in `FleeToOtherClanLord`. Any structural mismatch throws during patch application. Patch application is atomic at the feature level: if either target cannot be rewritten, DSFix removes any transpiler it already installed on the other target and rethrows, so the game never runs with only part of the five-site fix.
+Existing v1.7.8-and-earlier saves did not contain exact AI-promotion tracking. v1.7.9 therefore performs a **one-time persisted migration** for the narrow already-broken state: active, free, non-player clan wanderer companions with no party or governor that are currently resident in a settlement. Those heroes are adopted into the recovery set and reattached when a valid clan lord party exists.
 
-All other `TroopRoster.RemoveTroop` calls remain completely native. No exception type is suppressed.
+The migration runs only once per save; future unrelated heroes are not repeatedly discovered through heuristic scanning.
 
-The TOR summoned-agent result fix, promoted race/body identity preservation, save/load persistence, culture-accurate naming, and optional external-name-list handling are unchanged.
+### Preserved fixes
+
+The v1.7.8 exact five-site `RemoveTroop` root fix remains unchanged, including the 2 validated calls in `MapEventEnded` and 3 in `FleeToOtherClanLord`. TOR summoned-agent handling, promoted race/body identity, body-compatible age generation, save/load persistence, culture-accurate naming, and optional external-name-list support are also unchanged.
