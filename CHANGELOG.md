@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.7.9
+
+- Fixed Distinguished Service AI-promoted companions becoming permanent tavern residents after their original party is defeated and later destroyed/disbanded.
+- Confirmed the exact supported Distinguished Service 1.3.14 binary creates AI promotions as `Occupation.Wanderer` companions and adds them to the promoting lord's clan/party.
+- Confirmed its `MapEventEnded` defeat logic only processes promoted wanderers that are already absent from the defeated party roster at that instant. A promoted companion still present then can survive the one-shot cleanup and become unassigned only when Bannerlord destroys the party afterward.
+- Confirmed Bannerlord 1.3.15 does not naturally close that lifecycle gap: unassigned wanderers can be relocated to settlements, wanderers are excluded from autonomous settlement movement, and normal AI lord-party commander selection requires `Occupation.Lord`.
+- Added an exact transpiler for `DistinguishedService.PromotionManager.PromoteToParty(CharacterObject, MobileParty)` that requires exactly one `AddHeroToPartyAction.Apply(Hero, MobileParty, bool)` call. Native party insertion runs first; only a successful AI promotion is then recorded for recovery.
+- Added save-persistent tracking for exact Distinguished Service AI promotions. No global `AddHeroToPartyAction` hook is installed.
+- Added `MobilePartyDestroyed` recovery: a tracked companion still in the destroyed party is moved to another active, non-disbanding, non-battle lord party of the hero's current companion clan when one is available.
+- Added deferred daily recovery for tracked companions that Bannerlord has already left free, unassigned, and resident in a settlement. Prisoners, governors, fugitives/released heroes still transitioning, player-clan companions, and heroes no longer using wanderer semantics are not forcibly moved.
+- Recovery always follows the hero's current `CompanionOf` clan. The saved clan ID is not used to restore historical ownership, so legitimate clan changes are respected.
+- Added a one-time, save-persisted migration for existing saves that already contain stranded non-player clan wanderer companions in the exact tavern-resident state.
+- Added release validation for exact one-call AI-promotion tracking, native-call-before-track ordering, no global action hook, save-state persistence, destruction/daily recovery, current-clan ownership, player exclusion, and one-time legacy migration.
+
 ## 1.7.8
 
 - Replaced the v1.7.7 event-scoped `TroopRoster` containment with an exact root-cause compatibility rewrite against the supplied Distinguished Service 1.3.14 binary (`SHA-256 58cfbba78db17c3f26787cf3cb97e3ae0da4c68f9604517ce7f3347275bce184`).
@@ -52,7 +66,7 @@
 ## 1.7.3
 
 - Fixed the startup warning/error `System.MissingMethodException: get_using_extern_namelist()` from `DSFix.LoreNamePatch.FindExternalNamesGetter` on Distinguished Service builds that do not expose that property getter.
-- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-troop naming patch set.
+- Made the Distinguished Service external-name-list bypass an optional naming hook instead of a hard prerequisite for the entire TOR promoted-name patch set.
 - The core `PromoteUnit`, `NameGenerator.GenerateHeroFirstName`, and `GetNameSuffix` hooks now continue to patch when `get_using_extern_namelist()` is absent.
 - Preserved the separate direct pre-inquiry naming enforcement in `DSFix.InBattleNaming`, so source-culture promoted names do not depend on the external-name-list getter existing.
 - Added release validation that rejects reintroducing a mandatory external-name-list getter dependency.
