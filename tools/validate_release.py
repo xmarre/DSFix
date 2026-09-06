@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.7.8"
+EXPECTED_VERSION = "1.7.9"
 
 
 def fail(message: str) -> None:
@@ -45,6 +45,8 @@ def main() -> None:
         "GenerateHeroFirstName",
         "PromotionIdentityPatch.TryPatch()",
         "AddBehavior(new PromotionIdentityCampaignBehavior())",
+        "AIPromotedCompanionRecoveryPatch.TryPatch(_harmony)",
+        "AddBehavior(new AIPromotedCompanionRecoveryBehavior())",
     ):
         if required not in source:
             fail(f"main source missing required compatibility hook: {required}")
@@ -79,8 +81,6 @@ def main() -> None:
         if required not in roster_source:
             fail(f"exact Distinguished Service RemoveTroop rewrite missing: {required}")
 
-    # The root-cause fix must not regress to a global TroopRoster patch, event-wide context,
-    # or exception suppression. Only the five call sites in the two DS methods are rewritten.
     for forbidden in (
         "harmony.Patch(removeTroop",
         "RemoveTroopPrefix",
@@ -148,6 +148,79 @@ def main() -> None:
         fail("safe replacement suppresses native null/non-positive input behavior")
     if "roster.RemoveTroop(troop, numberToRemove, troopSeed, xp);" not in safe_remove_body:
         fail("safe replacement does not preserve native RemoveTroop for every non-targeted input")
+
+    ai_patch_source = (ROOT / "DSFix" / "AIPromotedCompanionRecoveryPatch.cs").read_text(encoding="utf-8")
+    for required in (
+        'private const string PromotionManagerTypeName = "DistinguishedService.PromotionManager";',
+        'private const string CharacterObjectTypeName = "TaleWorlds.CampaignSystem.CharacterObject";',
+        'private const string MobilePartyTypeName = "TaleWorlds.CampaignSystem.Party.MobileParty";',
+        "ExpectedAddHeroToPartyRewriteCount = 1",
+        'm.Name == "PromoteToParty" && m.ReturnType == typeof(void)',
+        "FindAddHeroToParty()",
+        "instruction.Calls(_nativeAddHeroToPartyMethod)",
+        "instruction.opcode = OpCodes.Call;",
+        "instruction.operand = TrackedAddHeroToPartyMethod;",
+        "if (rewriteCount != ExpectedAddHeroToPartyRewriteCount)",
+        "Refusing to install ambiguous AI-promotion tracking against a changed Distinguished Service binary.",
+        "harmony.Unpatch(promoteToParty, HarmonyPatchType.Transpiler, harmony.Id);",
+        "private static void AddHeroToPartyAndTrack(Hero hero, MobileParty party, bool showNotification)",
+        "AddHeroToPartyAction.Apply(hero, party, showNotification);",
+        "AIPromotedCompanionRecoveryBehavior.TrackPromotion(hero, party);",
+    ):
+        if required not in ai_patch_source:
+            fail(f"exact Distinguished Service AI-promotion tracking invariant missing: {required}")
+
+    ai_helper = re.search(
+        r"private static void AddHeroToPartyAndTrack\((.*?)\n        }\n    }\n}",
+        ai_patch_source,
+        re.S,
+    )
+    if not ai_helper:
+        fail("could not locate exact AI-promotion AddHeroToParty replacement")
+    ai_helper_body = ai_helper.group(1)
+    native_call = ai_helper_body.find("AddHeroToPartyAction.Apply(hero, party, showNotification);")
+    track_call = ai_helper_body.find("AIPromotedCompanionRecoveryBehavior.TrackPromotion(hero, party);")
+    if native_call < 0 or track_call < 0 or native_call > track_call:
+        fail("AI-promotion helper must complete native AddHeroToPartyAction before recording the promotion")
+    if "harmony.Patch(_nativeAddHeroToPartyMethod" in ai_patch_source or "harmony.Patch(typeof(AddHeroToPartyAction" in ai_patch_source:
+        fail("global AddHeroToPartyAction patch introduced; AI promotion tracking must remain inside exact DS PromoteToParty")
+
+    ai_behavior_source = (ROOT / "DSFix" / "AIPromotedCompanionRecoveryBehavior.cs").read_text(encoding="utf-8")
+    for required in (
+        'private const string TrackedSaveKey = "DSFix_AIPromotedCompanions_v1";',
+        'private const string LegacyMigrationSaveKey = "DSFix_AIPromotedCompanionLegacyMigration_v1";',
+        "dataStore.SyncData(TrackedSaveKey, ref _trackedHeroClans);",
+        "dataStore.SyncData(LegacyMigrationSaveKey, ref _legacyMigrationCompleted);",
+        "CampaignEvents.DailyTickHeroEvent.AddNonSerializedListener",
+        "CampaignEvents.MobilePartyDestroyed.AddNonSerializedListener",
+        "CampaignEvents.OnSessionLaunchedEvent.AddNonSerializedListener",
+        "ReferenceEquals(hero.PartyBelongedTo, mobileParty)",
+        "TryRecoverToClanParty(hero, mobileParty, \"destroyed-party recovery\")",
+        "if (_legacyMigrationCompleted || !AIPromotedCompanionRecoveryPatch.IsPatched",
+        "_legacyMigrationCompleted = true;",
+        "IsLegacyStrandedCandidate",
+        "hero.CompanionOf != null",
+        "hero.CompanionOf != Clan.PlayerClan",
+        "hero.CharacterObject.Occupation == Occupation.Wanderer",
+        "hero.PartyBelongedTo == null",
+        "hero.PartyBelongedToAsPrisoner == null",
+        "hero.CurrentSettlement != null",
+        "Clan clan = hero.CompanionOf;",
+        "party != MobileParty.MainParty",
+        "party.IsActive",
+        "!party.IsDisbanding",
+        "party.MapEvent == null",
+        "party.IsLordParty",
+        "party.LeaderHero.Clan == clan",
+        "AddHeroToPartyAction.Apply(hero, targetParty, false);",
+    ):
+        if required not in ai_behavior_source:
+            fail(f"AI-promoted companion lifecycle recovery invariant missing: {required}")
+
+    if "Clan.PlayerClan" not in ai_behavior_source:
+        fail("AI-promoted companion recovery lacks explicit player-clan exclusion")
+    if re.search(r"GetObject\s*<\s*Clan\s*>", ai_behavior_source):
+        fail("AI-promoted companion recovery must use the hero's current CompanionOf clan, not restore a saved historical clan object")
 
     for required in (
         "MethodInfo externalNamesGetter = FindExternalNamesGetter(managerType);",
