@@ -9,7 +9,7 @@ namespace DSFix
 {
     public sealed class SubModule : MBSubModuleBase
     {
-        internal const string HarmonyId = "xmarre.dsfix.bannerlord.1.3.15.tor.witm.1.16.distinguishedservice.7.8";
+        internal const string HarmonyId = "xmarre.dsfix.bannerlord.1.3.15.tor.witm.1.16.distinguishedservice.7.9";
         private Harmony _harmony;
         private AssemblyLoadEventHandler _assemblyLoadHandler;
 
@@ -29,7 +29,10 @@ namespace DSFix
 
             CampaignGameStarter campaignStarter = starterObject as CampaignGameStarter;
             if (campaignStarter != null)
+            {
                 campaignStarter.AddBehavior(new PromotionIdentityCampaignBehavior());
+                campaignStarter.AddBehavior(new AIPromotedCompanionRecoveryBehavior());
+            }
         }
 
         protected override void OnSubModuleUnloaded()
@@ -40,6 +43,7 @@ namespace DSFix
                 _assemblyLoadHandler = null;
             }
 
+            try { AIPromotedCompanionRecoveryPatch.Reset(); } catch (Exception ex) { DSLog.Write("Failed to clear AI-promoted companion recovery patch state: " + ex.Message); }
             try { PromotionIdentityPatch.Reset(); } catch (Exception ex) { DSLog.Write("Failed to clear promoted-troop identity context: " + ex.Message); }
             try { LoreNamePatch.Reset(); } catch (Exception ex) { DSLog.Write("Failed to clear promoted-troop naming context: " + ex.Message); }
             try { _harmony?.UnpatchAll(HarmonyId); } catch { }
@@ -61,6 +65,9 @@ namespace DSFix
 
             try { LordPromotionRosterPatch.TryPatch(_harmony); }
             catch (Exception ex) { DSLog.Write("Lord-promotion roster patch failed: " + ex, true); }
+
+            try { AIPromotedCompanionRecoveryPatch.TryPatch(_harmony); }
+            catch (Exception ex) { DSLog.Write("AI-promoted companion recovery patch failed: " + ex, true); }
 
             try { PromotionIdentityPatch.TryPatch(); }
             catch (Exception ex) { DSLog.Write("TOR promoted-troop identity patches were not applied: " + ex, true); }
